@@ -1,2 +1,11 @@
 <Solution>
+  <Folder Name="/api-gateway/">
+    <Project Path="api-gateway/ApiGateway.csproj" />
+  </Folder>
+  <Folder Name="/reservation-worker/">
+    <Project Path="reservation-worker/ReservationWorker.csproj" />
+  </Folder>
+  <Folder Name="/shared-contracts/">
+    <Project Path="shared-contracts/SharedContracts.csproj" />
+  </Folder>
 </Solution>
