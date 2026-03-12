@@ -34,3 +34,4 @@ C:\wamp64\www\tablesync-monorepo\services\api-gateway\obj\Debug\net10.0\refint\A
 C:\wamp64\www\tablesync-monorepo\services\api-gateway\obj\Debug\net10.0\ApiGateway.pdb
 C:\wamp64\www\tablesync-monorepo\services\api-gateway\obj\Debug\net10.0\ApiGateway.genruntimeconfig.cache
 C:\wamp64\www\tablesync-monorepo\services\api-gateway\obj\Debug\net10.0\ref\ApiGateway.dll
+C:\wamp64\www\tablesync-monorepo\services\api-gateway\bin\Debug\net10.0\RabbitMQ.Client.dll
