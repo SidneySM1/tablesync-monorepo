@@ -5,3 +5,10 @@ public record LockRequest(
     DateTime ReservationDate, 
     string ClientId
 );
+
+public record QuickReserveRequest(
+    int GuestCount,
+    string ClientId, 
+    Guid? SectorId,
+    DateTime? TargetDate
+);
