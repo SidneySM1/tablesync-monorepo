@@ -22,8 +22,10 @@ public class Reservation
     [Column("customer_phone")]
     public string CustomerPhone { get; set; } = string.Empty;
 
-    [Column("table_number")]
-    public int TableNumber { get; set; }
+    // A MÁGICA: Agora a reserva aponta para a mesa física!
+    [Column("restaurant_table_id")]
+    public Guid RestaurantTableId { get; set; }
+    public RestaurantTable? RestaurantTable { get; set; }
 
     [Column("guest_count")]
     public int GuestCount { get; set; }

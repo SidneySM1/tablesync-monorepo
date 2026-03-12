@@ -41,7 +41,7 @@ public class Worker : BackgroundService
 
             if (dto != null)
             {
-                _logger.LogInformation("✅ Processando reserva {Id} (Mesa {Table})", dto.ReservationId, dto.TableNumber);
+                _logger.LogInformation("✅ Processando reserva {Id} (Mesa {Table})", dto.ReservationId, dto.RestaurantTableId);
 
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -52,7 +52,7 @@ public class Worker : BackgroundService
                     CustomerName = dto.CustomerName,
                     CustomerEmail = dto.CustomerEmail,
                     CustomerPhone = dto.CustomerPhone,
-                    TableNumber = dto.TableNumber,
+                    RestaurantTableId = dto.RestaurantTableId, // <-- Atualizado aqui!
                     GuestCount = dto.GuestCount,
                     ReservationDate = dto.ReservationDate.ToUniversalTime(), 
                     CreatedAt = dto.CreatedAt.ToUniversalTime()
@@ -61,7 +61,7 @@ public class Worker : BackgroundService
                 db.Reservations.Add(novaReserva);
                 await db.SaveChangesAsync(stoppingToken);
 
-                _logger.LogInformation("🚀 [SUCESSO GRAVADO NO BD] Mesa {Table} confirmada para {Name}!", novaReserva.TableNumber, novaReserva.CustomerName);
+                _logger.LogInformation("🚀 [SUCESSO GRAVADO NO BD] Reserva salva para {Name} na Mesa ID: {TableId}!", novaReserva.CustomerName, novaReserva.RestaurantTableId);
             }
 
             await _channel.BasicAckAsync(ea.DeliveryTag, multiple: false, cancellationToken: stoppingToken);
