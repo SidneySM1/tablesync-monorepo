@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # 1. Banco de Dados (PostgreSQL)
+  postgres:
+    image: postgres:15-alpine
+    container_name: tablesync-postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: tablesync_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - tablesync-network
+
+  # 2. Mensageria (RabbitMQ com painel de gestão)
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: tablesync-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"   # Porta de comunicação da API/Worker
+      - "15672:15672" # Porta do painel visual (Management UI)
+    networks:
+      - tablesync-network
+
+  # 3. Distributed Lock / Cache (Redis)
+  redis:
+    image: redis:7-alpine
+    container_name: tablesync-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - tablesync-network
+
+volumes:
+  postgres_data: # Persiste os dados do Postgres mesmo que o contentor vá abaixo
+
+networks:
+  tablesync-network:
+    driver: bridge

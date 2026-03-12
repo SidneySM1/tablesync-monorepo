@@ -1,0 +1,46 @@
+# PROJECT CONTEXT: TableSync
+
+## 1. Overview
+* **Project Name:** TableSync
+* **Goal:** Restaurant table reservation scheduling system focused on extremely high concurrency.
+* **Main Problem to Solve:** Race Conditions (ensure that thousands of simultaneous requests do not reserve the same table).
+* **Architecture Pattern:** Asynchronous Microservices (Event-Driven) organized in a Monorepo.
+* **Local Development Environment:** Windows (with WSL2/Docker Desktop).
+* **Deployment Target:** Kubernetes (K8s) with Linux containers (Alpine).
+
+## 2. Definitive Technology Stack
+* **Frontend (Mobile):** React Native with Expo (TypeScript), structured using Feature-Sliced Design (FSD).
+* **API Gateway (Producer):** C# (.NET 8+) ASP.NET Core Web API. Responsible for handling heavy HTTP traffic and quickly enqueuing requests.
+* **Worker (Consumer):** C# (.NET 8+) Worker Service. Runs in the background, consumes the RabbitMQ queue, and processes reservations safely.
+* **Shared Contracts:** C# Class Library. Used to share types (for example: `ReservationDTO`) between the API and the Worker.
+* **Messaging:** RabbitMQ (asynchronous communication between API and Worker).
+* **Relational Database:** PostgreSQL (accessed via Entity Framework Core by the Worker to persist reservations).
+* **In-Memory Database / Locking:** Redis (StackExchange.Redis). Used as a distributed lock by the Worker to manage concurrency before writing to Postgres.
+
+## 3. Monorepo Structure
+tablesync-monorepo/
+├── apps/
+│   └── mobile-app/          # React Native + Expo (FSD architecture)
+├── services/
+│   ├── api-gateway/         # C# ASP.NET Core Web API
+│   ├── reservation-worker/  # C# .NET Worker Service
+│   └── shared-contracts/    # C# Class Library
+├── infra/
+│   ├── docker/              # docker-compose.yml (Postgres, RabbitMQ, Redis)
+│   └── k8s/                 # Kubernetes manifests (Deployments, Services, HPA)
+└── README.md                # Architecture documentation
+
+## 4. Data Flow (Business Logic)
+1. The app (React Native/FSD) sends a POST request to `api-gateway`.
+2. The API validates the payload, converts it to JSON, and publishes it to the RabbitMQ queue, immediately returning HTTP 202 (Accepted) to the app.
+3. The `reservation-worker` consumes the queue message.
+4. The Worker requests a Redis lock for the specific `TableID`.
+   * If it fails (lock already held in the same millisecond), it discards the message or reports a failure.
+   * If it acquires the lock, it writes to PostgreSQL via EF Core, saves the reservation, and releases the Redis lock.
+5. (Future) Push notification, WebSockets, or Polling informs the mobile app about reservation success/failure.
+
+## 5. AI Guidelines
+* When generating C# code, prioritize modern .NET 8+ syntax (Minimal APIs, Records for DTOs, native Dependency Injection).
+* Frontend code must strictly follow Feature-Sliced Design layers (`app`, `processes`, `pages`, `widgets`, `features`, `entities`, `shared`).
+* Backend code must focus on performance, resilience, and readiness for Docker Linux containers.
+* Explain decisions with focus on scalability and proper Kubernetes usage.
