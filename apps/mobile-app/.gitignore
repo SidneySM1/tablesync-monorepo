@@ -1,0 +1,89 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders
+/ios
+/android
+
+# ==============================================================================
+# DEPENDÊNCIAS
+# ==============================================================================
+node_modules/
+.pnp
+.pnp.js
+
+# ==============================================================================
+# EXPO & REACT NATIVE (BUILD E CACHE)
+# ==============================================================================
+.expo/
+dist/
+web-build/
+*.tsbuildinfo
+
+# Pastas nativas geradas automaticamente (Se for usar o Expo Prebuild no futuro)
+# ios/
+# android/
+
+# ==============================================================================
+# VARIÁVEIS DE AMBIENTE E SEGURANÇA (CRÍTICO)
+# ==============================================================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# ==============================================================================
+# LOGS E DEBUG
+# ==============================================================================
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+expo-debug.log*
+
+# ==============================================================================
+# SISTEMA OPERACIONAL
+# ==============================================================================
+.DS_Store
+Thumbs.db
