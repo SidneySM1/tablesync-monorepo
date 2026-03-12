@@ -1,0 +1,52 @@
+# ==============================================================================
+# 1. .NET / C# (O Backend)
+# ==============================================================================
+# Ignora as pastas de compilação de todos os microsserviços
+[Bb]in/
+[Oo]bj/
+
+# Arquivos de usuário e cache do Visual Studio / Rider / OmniSharp
+*.user
+*.userprefs
+*.suo
+.vs/
+.ionide/
+
+# PROTEÇÃO CRÍTICA: Nunca commitar configurações locais e senhas de banco de dados
+appsettings.Development.json
+appsettings.*.Local.json
+secrets.json
+
+# ==============================================================================
+# 2. NODE / REACT NATIVE (O Frontend)
+# ==============================================================================
+# Mesmo que o app tenha seu próprio .gitignore, garantimos o bloqueio na raiz
+node_modules/
+.expo/
+dist/
+web-build/
+*.tsbuildinfo
+
+# ==============================================================================
+# 3. INFRAESTRUTURA E DOCKER
+# ==============================================================================
+.env
+.env.*
+!.env.example
+*.log
+
+# ==============================================================================
+# 4. SISTEMA OPERACIONAL E IDEs
+# ==============================================================================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+$RECYCLE.BIN/
+
+# Ignora tudo do VS Code...
+.vscode/*
+# ...EXCETO os arquivos de configuração que queremos compartilhar com a equipe
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
