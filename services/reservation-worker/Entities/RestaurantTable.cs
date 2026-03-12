@@ -26,4 +26,6 @@ public class RestaurantTable
 
     [Column("position_y")]
     public double PositionY { get; set; }
+
+    public ICollection<TimeSlot> TimeSlots { get; set; } = new List<TimeSlot>();
 }

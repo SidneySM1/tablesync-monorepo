@@ -54,6 +54,24 @@ public static class DbSeeder
 
         db.RestaurantTables.AddRange(mesas);
 
+        // 4. Criar os Horários (Time Slots) para cada mesa
+        var slots = new List<TimeSlot>();
+        
+        foreach (var mesa in mesas)
+        {
+            // Padrão: 18:00 às 20:00 e 20:00 às 22:00
+            slots.Add(new TimeSlot { Id = Guid.NewGuid(), RestaurantTableId = mesa.Id, StartTime = new TimeSpan(18, 0, 0), EndTime = new TimeSpan(20, 0, 0) });
+            slots.Add(new TimeSlot { Id = Guid.NewGuid(), RestaurantTableId = mesa.Id, StartTime = new TimeSpan(20, 0, 0), EndTime = new TimeSpan(22, 0, 0) });
+            
+            // A Mesa 5 (Mesão da Família) tem um horário especial VIP mais tarde
+            if (mesa.TableNumber == 5)
+            {
+                slots.Add(new TimeSlot { Id = Guid.NewGuid(), RestaurantTableId = mesa.Id, StartTime = new TimeSpan(22, 30, 0), EndTime = new TimeSpan(23, 59, 0) });
+            }
+        }
+
+        db.TimeSlots.AddRange(slots);
+
         // Salvar tudo de uma vez no banco
         await db.SaveChangesAsync();
     }

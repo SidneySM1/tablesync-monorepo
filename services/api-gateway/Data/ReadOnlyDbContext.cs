@@ -39,6 +39,16 @@ public class ReservationRead
     [Column("reservation_date")] public DateTime ReservationDate { get; set; } 
 }
 
+[Table("time_slots")]
+public class TimeSlotRead
+{
+    [Column("id")] public Guid Id { get; set; }
+    [Column("restaurant_table_id")] public Guid RestaurantTableId { get; set; }
+    [Column("start_time")] public TimeSpan StartTime { get; set; }
+    [Column("end_time")] public TimeSpan EndTime { get; set; }
+    [Column("is_active")] public bool IsActive { get; set; }
+}
+
 public class ReadOnlyDbContext : DbContext
 {
     public ReadOnlyDbContext(DbContextOptions<ReadOnlyDbContext> options) : base(options) { }
@@ -47,6 +57,7 @@ public class ReadOnlyDbContext : DbContext
     public DbSet<SectorRead> Sectors { get; set; }
     public DbSet<TableRead> Tables { get; set; }
     public DbSet<ReservationRead> Reservations { get; set; }
+    public DbSet<TimeSlotRead> TimeSlots { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {

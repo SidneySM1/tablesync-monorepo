@@ -11,4 +11,6 @@ public class AppDbContext : DbContext
     public DbSet<Sector> Sectors { get; set; }
     public DbSet<RestaurantTable> RestaurantTables { get; set; }
     public DbSet<Reservation> Reservations { get; set; }
+
+    public DbSet<TimeSlot> TimeSlots { get; set; }
 }

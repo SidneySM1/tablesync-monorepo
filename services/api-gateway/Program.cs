@@ -10,22 +10,26 @@ using ApiGateway.DTOs;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Conexão com o Redis
+builder.Services.AddCors(options => options.AddDefaultPolicy(p => 
+    p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp => 
     ConnectionMultiplexer.Connect("localhost:6379"));
 
-// 2. Conexão de Leitura com o PostgreSQL
 builder.Services.AddDbContext<ReadOnlyDbContext>(options =>
     options.UseNpgsql("Host=localhost;Database=tablesync_db;Username=admin;Password=secretpassword"));
 
 var app = builder.Build();
+app.UseCors();
 
 // ==============================================================================
-// 1. ENDPOINT PARA O APP DESENHAR A TELA (GET /api/restaurants)
+// 1. LEITURA DE MESAS E SEUS HORÁRIOS EXATOS
 // ==============================================================================
-app.MapGet("/api/restaurants", async (ReadOnlyDbContext db) =>
+app.MapGet("/api/restaurants", async ([FromQuery] DateTime? date, ReadOnlyDbContext db) =>
 {
-    // Busca os restaurantes e monta um JSON estruturado com setores e mesas
+    // Pega apenas a DATA (00:00:00), descartando as horas.
+    var searchDate = date?.ToUniversalTime().Date ?? DateTime.UtcNow.Date;
+
     var data = await db.Restaurants
         .Select(r => new {
             r.Id,
@@ -35,7 +39,25 @@ app.MapGet("/api/restaurants", async (ReadOnlyDbContext db) =>
                 s.Name,
                 s.HasMapLayout,
                 s.AllowAnyTable,
-                Tables = db.Tables.Where(t => t.SectorId == s.Id).ToList()
+                Tables = db.Tables.Where(t => t.SectorId == s.Id).Select(t => new {
+                    t.Id,
+                    t.TableNumber,
+                    t.Capacity,
+                    t.PositionX,
+                    t.PositionY,
+                    // A MÁGICA: Traz os horários de cada mesa e checa a disponibilidade
+                    TimeSlots = db.TimeSlots
+                        .Where(ts => ts.RestaurantTableId == t.Id && ts.IsActive)
+                        .Select(ts => new {
+                            ts.Id,
+                            StartTime = ts.StartTime.ToString(@"hh\:mm"), // Formata para o Front (ex: "18:00")
+                            EndTime = ts.EndTime.ToString(@"hh\:mm"),
+                            // Está ocupado se houver reserva neste exato DIA + HORA DE INÍCIO
+                            IsOccupied = db.Reservations.Any(res => 
+                                res.RestaurantTableId == t.Id && 
+                                res.ReservationDate == searchDate.Add(ts.StartTime))
+                        }).OrderBy(ts => ts.StartTime).ToList()
+                }).ToList()
             }).ToList()
         }).ToListAsync();
 
@@ -43,55 +65,47 @@ app.MapGet("/api/restaurants", async (ReadOnlyDbContext db) =>
 });
 
 // ==============================================================================
-// 2. ENDPOINT DE LOCK BLINDADO (POST /api/reservations/lock)
+// 2. LOCK COM VALIDAÇÃO DE HORÁRIO EXATO
 // ==============================================================================
-app.MapPost("/api/reservations/lock", async ([FromBody] LockRequest request, IConnectionMultiplexer redis, ReadOnlyDbContext db, ILogger<Program> logger) =>
+app.MapPost("/api/reservations/lock", async ([FromBody] LockRequest request, IConnectionMultiplexer redis, ReadOnlyDbContext db) =>
 {
-    // A. Verifica no POSTGRESQL se a mesa JÁ ESTÁ COMPRADA para aquele horário específico
-    bool alreadyReservedInDb = await db.Reservations.AnyAsync(r => 
+    var exactDateTime = request.ReservationDate.ToUniversalTime();
+
+    // Checa se o horário exato já tem dono
+    bool hasReservation = await db.Reservations.AnyAsync(r => 
         r.RestaurantTableId == request.RestaurantTableId && 
-        r.ReservationDate == request.ReservationDate.ToUniversalTime());
+        r.ReservationDate == exactDateTime);
 
-    if (alreadyReservedInDb)
-    {
-        return Results.Conflict(new { Message = "Esta mesa já possui uma reserva confirmada para este horário." });
-    }
+    if (hasReservation) return Results.Conflict(new { Message = "Este horário já foi reservado." });
 
-    // B. Tenta o Lock no REDIS (Agora a chave inclui o Horário!)
-    // Exemplo de chave: mesa:a1b2-c3d4:horario:202603202000:bloqueada
-    var dbRedis = redis.GetDatabase();
-    string lockKey = $"mesa:{request.RestaurantTableId}:horario:{request.ReservationDate:yyyyMMddHHmm}:bloqueada";
+    var redisDb = redis.GetDatabase();
+    string lockKey = $"lock:table:{request.RestaurantTableId}:time:{exactDateTime:yyyyMMddHHmm}";
+    
+    bool acquired = await redisDb.StringSetAsync(lockKey, request.ClientId, TimeSpan.FromMinutes(5), When.NotExists);
 
-    bool acquired = await dbRedis.StringSetAsync(lockKey, request.ClientId, TimeSpan.FromMinutes(5), When.NotExists);
+    if (!acquired) return Results.Conflict(new { Message = "Horário sendo selecionado por outro cliente..." });
 
-    if (!acquired) 
-        return Results.Conflict(new { Message = "Alguém está preenchendo os dados desta mesa neste exato momento. Tente novamente em 5 minutos." });
-
-    logger.LogInformation("Mesa {TableId} bloqueada para {Client} às {Date}.", request.RestaurantTableId, request.ClientId, request.ReservationDate);
-    return Results.Ok(new { Message = "Mesa bloqueada.", ExpiresInSeconds = 300 });
+    return Results.Ok(new { Message = "Bloqueado com sucesso", ExpiresInSeconds = 300 });
 });
 
 // ==============================================================================
-// 3. ENDPOINT DE PUBLICAÇÃO NO RABBITMQ (POST /api/reservations)
+// 3. REGISTRO (Mantido igual, corrigido o bug do value:)
 // ==============================================================================
-app.MapPost("/api/reservations", async ([FromBody] ReservationDTO reservation, ILogger<Program> logger) =>
+app.MapPost("/api/reservations", async ([FromBody] ReservationDTO res, IConnectionMultiplexer redis, ILogger<Program> logger) =>
 {
-    try
-    {
+    try {
         var factory = new ConnectionFactory { HostName = "localhost" };
         await using var connection = await factory.CreateConnectionAsync();
         await using var channel = await connection.CreateChannelAsync();
-        await channel.QueueDeclareAsync("reservation_queue", durable: true, exclusive: false, autoDelete: false, arguments: null);
-
-        var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(reservation));
+        await channel.QueueDeclareAsync("reservation_queue", true, false, false, null);
+        var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(res));
         await channel.BasicPublishAsync(string.Empty, "reservation_queue", body);
+        
+        return Results.Accepted(value: new { Message = "Sucesso! Processando...", ReservationId = res.ReservationId });
     }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Erro no RabbitMQ.");
-        return Results.Problem("Erro interno.");
+    catch {
+        return Results.Problem("Erro de conexão.");
     }
-    return Results.Accepted(value: new { Message = "Reserva na fila.", ReservationId = reservation.ReservationId });
 });
 
 app.Run();
