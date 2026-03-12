@@ -604,6 +604,16 @@
             "rid": "win"
           }
         }
+      },
+      "SharedContracts/1.0.0": {
+        "type": "project",
+        "framework": ".NETCoreApp,Version=v10.0",
+        "compile": {
+          "bin/placeholder/SharedContracts.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/SharedContracts.dll": {}
+        }
       }
     }
   },
@@ -1510,11 +1520,17 @@
         "system.diagnostics.eventlog.nuspec",
         "useSharedDesignerContext.txt"
       ]
+    },
+    "SharedContracts/1.0.0": {
+      "type": "project",
+      "path": "../shared-contracts/SharedContracts.csproj",
+      "msbuildProject": "../shared-contracts/SharedContracts.csproj"
     }
   },
   "projectFileDependencyGroups": {
     "net10.0": [
-      "Microsoft.Extensions.Hosting >= 10.0.2"
+      "Microsoft.Extensions.Hosting >= 10.0.2",
+      "SharedContracts >= 1.0.0"
     ]
   },
   "packageFolders": {
@@ -1541,7 +1557,11 @@
       "frameworks": {
         "net10.0": {
           "targetAlias": "net10.0",
-          "projectReferences": {}
+          "projectReferences": {
+            "C:\\wamp64\\www\\tablesync-monorepo\\services\\shared-contracts\\SharedContracts.csproj": {
+              "projectPath": "C:\\wamp64\\www\\tablesync-monorepo\\services\\shared-contracts\\SharedContracts.csproj"
+            }
+          }
         }
       },
       "warningProperties": {
