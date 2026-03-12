@@ -1,13 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
 using SharedContracts;
 using RabbitMQ.Client;
-using StackExchange.Redis; // O poder do Redis
+using StackExchange.Redis;
 using System.Text;
 using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Conectando ao Redis (Singleton garante que a conexão fica aberta e super rápida)
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp => 
     ConnectionMultiplexer.Connect("localhost:6379"));
 
@@ -15,47 +14,25 @@ var app = builder.Build();
 
 app.MapGet("/", () => "TableSync API Gateway rodando com sucesso!");
 
-// ==============================================================================
-// NOVO ENDPOINT: PASSO 1 DO APP - BLOQUEAR A MESA TEMPORARIAMENTE
-// ==============================================================================
+// Endpoint de Lock (Agora usa Guid)
 app.MapPost("/api/reservations/lock", async ([FromBody] LockRequest request, IConnectionMultiplexer redis, ILogger<Program> logger) =>
 {
     var db = redis.GetDatabase();
-    string lockKey = $"mesa:{request.TableNumber}:bloqueada";
+    string lockKey = $"mesa:{request.RestaurantTableId}:bloqueada";
 
-    // A MÁGICA ACONTECE AQUI:
-    // Tenta criar a chave. O "When.NotExists" garante que, se 10 pessoas tentarem 
-    // rodar essa linha no mesmo milissegundo, o Redis só vai dizer "Sim (true)" para a primeira!
-    bool acquired = await db.StringSetAsync(
-        lockKey, 
-        request.ClientId, 
-        TimeSpan.FromMinutes(5), // O famoso TTL (destrói em 5 minutos)
-        When.NotExists
-    );
+    bool acquired = await db.StringSetAsync(lockKey, request.ClientId, TimeSpan.FromMinutes(5), When.NotExists);
 
-    if (!acquired)
-    {
-        logger.LogWarning("Bloqueio negado: Mesa {Table} já está em uso.", request.TableNumber);
-        // Retorna status 409 Conflict para o celular pintar a mesa de vermelho
-        return Results.Conflict(new { Message = "Esta mesa acabou de ser selecionada por outro cliente." });
-    }
+    if (!acquired) return Results.Conflict(new { Message = "Esta mesa acabou de ser selecionada por outro cliente." });
 
-    logger.LogInformation("Mesa {Table} bloqueada com sucesso por 5 min para o cliente {Client}.", request.TableNumber, request.ClientId);
-    // Retorna status 200 OK para o celular iniciar o cronômetro
-    return Results.Ok(new { 
-        Message = "Mesa bloqueada.", 
-        TableNumber = request.TableNumber, 
-        ExpiresInSeconds = 300 
-    });
+    logger.LogInformation("Mesa {TableId} bloqueada por 5 min para {Client}.", request.RestaurantTableId, request.ClientId);
+    return Results.Ok(new { Message = "Mesa bloqueada.", RestaurantTableId = request.RestaurantTableId, ExpiresInSeconds = 300 });
 });
 
-// ==============================================================================
-// ENDPOINT EXISTENTE: PASSO 2 DO APP - CONFIRMAR A RESERVA (RABBITMQ)
-// ==============================================================================
+// Endpoint de Confirmação
 app.MapPost("/api/reservations", async ([FromBody] ReservationDTO reservation, ILogger<Program> logger) =>
 {
-    // ... (Este é o exato mesmo código do RabbitMQ que já tínhamos feito)
-    logger.LogInformation("Recebido pedido de confirmação para a Mesa {TableNumber}", reservation.TableNumber);
+    // Atualizado para logar o RestaurantTableId
+    logger.LogInformation("Recebido pedido de confirmação para a Mesa ID {TableId}", reservation.RestaurantTableId);
 
     try
     {
@@ -69,8 +46,6 @@ app.MapPost("/api/reservations", async ([FromBody] ReservationDTO reservation, I
         var body = Encoding.UTF8.GetBytes(message);
 
         await channel.BasicPublishAsync(exchange: string.Empty, routingKey: "reservation_queue", body: body);
-
-        logger.LogInformation("Confirmação enviada para a fila!");
     }
     catch (Exception ex)
     {
@@ -83,5 +58,5 @@ app.MapPost("/api/reservations", async ([FromBody] ReservationDTO reservation, I
 
 app.Run();
 
-// DTO super leve apenas para a requisição de Lock
-public record LockRequest(int TableNumber, string ClientId);
+// DTO atualizado
+public record LockRequest(Guid RestaurantTableId, string ClientId);
