@@ -1,0 +1,48 @@
+# CONTEXTO DO PROJETO: TableSync
+
+## 1. Visão Geral
+* **Nome do Projeto:** TableSync
+* **Objetivo:** Sistema de agendamento de reservas de mesas de restaurantes focado em altíssima concorrência.
+* **Problema Principal a Resolver:** Race Conditions (garantir que milhares de requisições simultâneas não reservem a mesma mesa).
+* **Padrão de Arquitetura:** Microsserviços Assíncronos (Event-Driven) organizados em um Monorepo.
+* **Ambiente de Desenvolvimento Local:** Windows (com WSL2/Docker Desktop).
+* **Alvo de Deploy:** Kubernetes (K8s) com contêineres Linux (Alpine).
+
+## 2. Stack Tecnológica Definitiva
+* **Frontend (Mobile):** React Native com Expo (TypeScript), estruturado com a arquitetura Feature-Sliced Design (FSD).
+* **API Gateway (Produtor):** C# (.NET 8+) ASP.NET Core Minimal APIs. Responsável por receber o tráfego pesado HTTP, gerenciar bloqueios temporários no cache e enfileirar as requisições rapidamente.
+* **Worker (Consumidor):** C# (.NET 8+) Worker Service. Roda em background, consome a fila do RabbitMQ e processa a persistência no banco relacional.
+* **Shared Contracts:** C# Class Library. Para compartilhar as tipagens (ex: `ReservationDTO`, `LockRequest`) entre a API e o Worker, utilizando `records` imutáveis.
+* **Mensageria:** RabbitMQ (Comunicação assíncrona garantindo resiliência).
+* **Banco de Dados Relacional:** PostgreSQL (Acessado via Entity Framework Core pelo Worker para persistir as reservas definitivas).
+* **Banco de Dados em Memória / Lock:** Redis (StackExchange.Redis). Usado como Lock Distribuído temporário (TTL de 5 minutos) pela API Gateway para gerenciar a concorrência na etapa de seleção da mesa.
+
+## 3. Estrutura do Monorepo
+tablesync-monorepo/
+├── apps/
+│   └── mobile-app/          # React Native + Expo (Arquitetura FSD)
+├── services/
+│   ├── api-gateway/         # C# Minimal API (Acessa Redis e RabbitMQ)
+│   ├── reservation-worker/  # C# Worker Service (Acessa RabbitMQ e PostgreSQL via EF Core)
+│   └── shared-contracts/    # C# Class Library (DTOs)
+├── infra/
+│   ├── docker/              # docker-compose.yml (Postgres, RabbitMQ, Redis)
+│   └── k8s/                 # Manifestos do Kubernetes (Deployments, Services, HPA)
+└── README.md                # Documentação da arquitetura
+
+## 4. Fluxo de Dados (Business Logic atualizada)
+1. **Seleção de Mesa (Guest Checkout):** O App (React Native) envia um POST para `/api/reservations/lock` contendo o número da mesa.
+2. **Bloqueio Temporário:** A `api-gateway` tenta criar uma chave no Redis com TTL de 5 minutos.
+   * Se falhar (alguém clicou no mesmo milissegundo), retorna HTTP 409 Conflict.
+   * Se sucesso, retorna HTTP 200 OK e a mesa fica bloqueada visualmente para os outros.
+3. **Confirmação:** O cliente preenche os dados (Nome, Email, Telefone, Qtd Pessoas) e o App envia POST para `/api/reservations`.
+4. **Enfileiramento:** A API empacota os dados no `ReservationDTO`, publica na fila do RabbitMQ e retorna HTTP 202 (Accepted).
+5. **Processamento:** O `reservation-worker` consome a mensagem da fila em background.
+6. **Persistência:** O Worker abre um escopo do Entity Framework Core e salva a reserva definitivamente no PostgreSQL.
+7. (Futuro) Worker apaga o lock do Redis e sistema notifica o mobile.
+
+## 5. Diretrizes para a IA
+* Ao gerar código C#, priorize a sintaxe moderna do .NET 8+ (Minimal APIs, Records para DTOs, Injeção de Dependência nativa, async/await nativo).
+* O código frontend deve respeitar estritamente as camadas do Feature-Sliced Design (app, processes, pages, widgets, features, entities, shared).
+* O código backend deve ser focado em performance, resiliência e pronto para rodar em contêineres Docker (Linux).
+* Explique as decisões focando em escalabilidade e no uso correto do Kubernetes.

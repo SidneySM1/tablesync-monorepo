@@ -128,8 +128,9 @@ app.MapPost("/api/reservations/quick", async ([FromBody] QuickReserveRequest req
                             join s in db.Sectors on t.SectorId equals s.Id
                             where ts.IsActive 
                                && t.Capacity >= req.GuestCount // Tem que caber a galera
+                               && t.Capacity <= req.GuestCount + 2 // REGRA DE OURO: No máximo 2 lugares sobrando!
                                && (!req.SectorId.HasValue || t.SectorId == req.SectorId.Value)
-                            orderby t.Capacity ascending, ts.StartTime ascending // Menor desperdício de lugares primeiro
+                            orderby t.Capacity ascending, ts.StartTime ascending 
                             select new {
                                 ts.RestaurantTableId,
                                 ts.StartTime,

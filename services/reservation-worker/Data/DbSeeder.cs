@@ -41,20 +41,26 @@ public static class DbSeeder
         
         db.Sectors.AddRange(varanda, salaoInterno);
 
-        // 3. Criar as Mesas (Apenas na Varanda, como exemplo)
-        // Usamos porcentagens (0.0 a 100.0) para PositionX e Y para ficar fácil no frontend
+        // 3. Criar as Mesas (Varanda e Salão Principal)
         var mesas = new List<RestaurantTable>
         {
+            // MESAS DA VARANDA (Com posições X e Y para o mapa)
             new() { Id = Guid.NewGuid(), SectorId = varandaId, TableNumber = 1, Capacity = 2, PositionX = 10.5, PositionY = 20.0 },
             new() { Id = Guid.NewGuid(), SectorId = varandaId, TableNumber = 2, Capacity = 2, PositionX = 10.5, PositionY = 40.0 },
             new() { Id = Guid.NewGuid(), SectorId = varandaId, TableNumber = 3, Capacity = 4, PositionX = 50.0, PositionY = 30.0 },
             new() { Id = Guid.NewGuid(), SectorId = varandaId, TableNumber = 4, Capacity = 4, PositionX = 50.0, PositionY = 60.0 },
-            new() { Id = Guid.NewGuid(), SectorId = varandaId, TableNumber = 5, Capacity = 8, PositionX = 80.0, PositionY = 45.0 } // Mesão da família
+            new() { Id = Guid.NewGuid(), SectorId = varandaId, TableNumber = 5, Capacity = 8, PositionX = 80.0, PositionY = 45.0 }, // Mesão da família
+
+            // MESAS DO SALÃO PRINCIPAL (X e Y são zero, pois não aparecem no mapa, mas existem fisicamente)
+            new() { Id = Guid.NewGuid(), SectorId = salaoId, TableNumber = 10, Capacity = 2, PositionX = 0, PositionY = 0 },
+            new() { Id = Guid.NewGuid(), SectorId = salaoId, TableNumber = 11, Capacity = 4, PositionX = 0, PositionY = 0 },
+            new() { Id = Guid.NewGuid(), SectorId = salaoId, TableNumber = 12, Capacity = 6, PositionX = 0, PositionY = 0 },
+            new() { Id = Guid.NewGuid(), SectorId = salaoId, TableNumber = 13, Capacity = 10, PositionX = 0, PositionY = 0 }
         };
 
         db.RestaurantTables.AddRange(mesas);
 
-        // 4. Criar os Horários (Time Slots) para cada mesa
+        // 4. Criar os Horários (Time Slots) para CADA mesa (Varanda e Salão)
         var slots = new List<TimeSlot>();
         
         foreach (var mesa in mesas)
@@ -63,8 +69,8 @@ public static class DbSeeder
             slots.Add(new TimeSlot { Id = Guid.NewGuid(), RestaurantTableId = mesa.Id, StartTime = new TimeSpan(18, 0, 0), EndTime = new TimeSpan(20, 0, 0) });
             slots.Add(new TimeSlot { Id = Guid.NewGuid(), RestaurantTableId = mesa.Id, StartTime = new TimeSpan(20, 0, 0), EndTime = new TimeSpan(22, 0, 0) });
             
-            // A Mesa 5 (Mesão da Família) tem um horário especial VIP mais tarde
-            if (mesa.TableNumber == 5)
+            // A Mesa 5 (Varanda) e a Mesa 13 (Salão) têm um horário especial VIP mais tarde
+            if (mesa.TableNumber == 5 || mesa.TableNumber == 13)
             {
                 slots.Add(new TimeSlot { Id = Guid.NewGuid(), RestaurantTableId = mesa.Id, StartTime = new TimeSpan(22, 30, 0), EndTime = new TimeSpan(23, 59, 0) });
             }
