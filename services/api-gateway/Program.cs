@@ -191,4 +191,89 @@ app.MapPost("/api/reservations/quick", async ([FromBody] QuickReserveRequest req
 });
 
 
+// 5. CALENDÁRIO INTELIGENTE: BUSCAR DATAS DISPONÍVEIS PARA UM SETOR
+app.MapGet("/api/sectors/{sectorId:guid}/available-dates", async (
+    Guid sectorId, 
+    [FromQuery] int guestCount, 
+    ReadOnlyDbContext db, 
+    IConnectionMultiplexer redis) =>
+{
+    var redisDb = redis.GetDatabase();
+    var today = DateTime.UtcNow.Date;
+    var currentTimeOfDay = DateTime.UtcNow.TimeOfDay;
+    int daysToSearch = 15; // Vamos projetar os próximos 15 dias
+
+    // 1. Busca as mesas do setor que servem para essa quantidade de pessoas (Margem de +2)
+    var validTables = await (from t in db.Tables
+                             where t.SectorId == sectorId 
+                                && t.Capacity >= guestCount 
+                                && t.Capacity <= guestCount + 2
+                             select new {
+                                 t.Id,
+                                 TimeSlots = db.TimeSlots
+                                    .Where(ts => ts.RestaurantTableId == t.Id && ts.IsActive)
+                                    .Select(ts => ts.StartTime)
+                                    .ToList()
+                             }).ToListAsync();
+
+    if (!validTables.Any())
+        return Results.Ok(new List<string>()); // Nenhuma mesa atende o critério físico
+
+    // 2. Performance: Busca TODAS as reservas dos próximos 15 dias de uma vez só no Postgres
+    var tableIds = validTables.Select(t => t.Id).ToList();
+    var maxDate = today.AddDays(daysToSearch);
+    
+    var existingReservations = await db.Reservations
+        .Where(r => tableIds.Contains(r.RestaurantTableId) 
+                 && r.ReservationDate >= today 
+                 && r.ReservationDate <= maxDate)
+        .Select(r => new { r.RestaurantTableId, r.ReservationDate })
+        .ToListAsync();
+
+    var availableDates = new List<string>();
+
+    // 3. Varredura dos dias para descobrir quais têm pelo menos UMA vaga
+    for (int i = 0; i < daysToSearch; i++)
+    {
+        var checkDate = today.AddDays(i);
+        bool isToday = i == 0;
+        bool dayHasVacancy = false;
+
+        foreach (var table in validTables)
+        {
+            if (dayHasVacancy) break; // Se já achou vaga nesse dia, não precisa testar as outras mesas
+
+            foreach (var startTime in table.TimeSlots)
+            {
+                // Regra de Ouro: Se é hoje e o horário já passou, ignora
+                if (isToday && startTime <= currentTimeOfDay) continue;
+
+                var exactDateTime = checkDate.Add(startTime);
+
+                // A. Verifica se está reservado definitivamente no Postgres
+                bool isReservedInDb = existingReservations.Any(r => 
+                    r.RestaurantTableId == table.Id && 
+                    r.ReservationDate == exactDateTime);
+
+                if (isReservedInDb) continue;
+
+                // B. Verifica se está trancado no Redis (Alguém no checkout)
+                string lockKey = $"lock:table:{table.Id}:time:{exactDateTime:yyyyMMddHHmm}";
+                bool isLocked = await redisDb.KeyExistsAsync(lockKey);
+
+                if (!isLocked)
+                {
+                    // BINGO! Achamos um horário livre. Este dia é elegível.
+                    dayHasVacancy = true;
+                    availableDates.Add(checkDate.ToString("yyyy-MM-dd"));
+                    break; // Sai do loop de horários e vai para o próximo dia
+                }
+            }
+        }
+    }
+
+    return Results.Ok(availableDates);
+});
+
+
 app.Run();
