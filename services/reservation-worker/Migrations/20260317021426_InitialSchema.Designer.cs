@@ -12,8 +12,8 @@ using ReservationWorker.Data;
 namespace ReservationWorker.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260312142816_AddFloorManagement")]
-    partial class AddFloorManagement
+    [Migration("20260317021426_InitialSchema")]
+    partial class InitialSchema
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -29,45 +29,38 @@ namespace ReservationWorker.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("CustomerEmail")
                         .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("customer_email");
+                        .HasColumnType("text");
 
                     b.Property<string>("CustomerName")
                         .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("customer_name");
+                        .HasColumnType("text");
 
                     b.Property<string>("CustomerPhone")
                         .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("customer_phone");
+                        .HasColumnType("text");
 
                     b.Property<int>("GuestCount")
-                        .HasColumnType("integer")
-                        .HasColumnName("guest_count");
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("ReservationDate")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("reservation_date");
+                        .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid>("RestaurantTableId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("restaurant_table_id");
+                    b.Property<Guid?>("RestaurantTableId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SectorId")
+                        .HasColumnType("uuid");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("RestaurantTableId");
-
-                    b.ToTable("reservations");
+                    b.ToTable("Reservations", (string)null);
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.Restaurant", b =>
@@ -84,7 +77,7 @@ namespace ReservationWorker.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("restaurants");
+                    b.ToTable("restaurants", (string)null);
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.RestaurantTable", b =>
@@ -118,49 +111,61 @@ namespace ReservationWorker.Migrations
 
                     b.HasIndex("SectorId");
 
-                    b.ToTable("restaurant_tables");
+                    b.ToTable("restaurant_tables", (string)null);
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.Sector", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
+                        .HasColumnType("uuid");
 
                     b.Property<bool>("AllowAnyTable")
-                        .HasColumnType("boolean")
-                        .HasColumnName("allow_any_table");
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("HasMapLayout")
-                        .HasColumnType("boolean")
-                        .HasColumnName("has_map_layout");
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("name");
+                        .HasColumnType("text");
 
                     b.Property<Guid>("RestaurantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("restaurant_id");
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("TotalCapacity")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
                     b.HasIndex("RestaurantId");
 
-                    b.ToTable("sectors");
+                    b.ToTable("Sectors", (string)null);
                 });
 
-            modelBuilder.Entity("ReservationWorker.Entities.Reservation", b =>
+            modelBuilder.Entity("ReservationWorker.Entities.TimeSlot", b =>
                 {
-                    b.HasOne("ReservationWorker.Entities.RestaurantTable", "RestaurantTable")
-                        .WithMany()
-                        .HasForeignKey("RestaurantTableId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
 
-                    b.Navigation("RestaurantTable");
+                    b.Property<TimeSpan>("EndTime")
+                        .HasColumnType("interval");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("SectorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<TimeSpan>("StartTime")
+                        .HasColumnType("interval");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SectorId");
+
+                    b.ToTable("TimeSlots", (string)null);
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.RestaurantTable", b =>
@@ -176,13 +181,20 @@ namespace ReservationWorker.Migrations
 
             modelBuilder.Entity("ReservationWorker.Entities.Sector", b =>
                 {
-                    b.HasOne("ReservationWorker.Entities.Restaurant", "Restaurant")
+                    b.HasOne("ReservationWorker.Entities.Restaurant", null)
                         .WithMany("Sectors")
                         .HasForeignKey("RestaurantId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
 
-                    b.Navigation("Restaurant");
+            modelBuilder.Entity("ReservationWorker.Entities.TimeSlot", b =>
+                {
+                    b.HasOne("ReservationWorker.Entities.Sector", null)
+                        .WithMany("TimeSlots")
+                        .HasForeignKey("SectorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.Restaurant", b =>
@@ -193,6 +205,8 @@ namespace ReservationWorker.Migrations
             modelBuilder.Entity("ReservationWorker.Entities.Sector", b =>
                 {
                     b.Navigation("Tables");
+
+                    b.Navigation("TimeSlots");
                 });
 #pragma warning restore 612, 618
         }

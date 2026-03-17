@@ -57,7 +57,7 @@ namespace ReservationWorker.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Reservations");
+                    b.ToTable("Reservations", (string)null);
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.Restaurant", b =>
@@ -74,7 +74,7 @@ namespace ReservationWorker.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("restaurants");
+                    b.ToTable("restaurants", (string)null);
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.RestaurantTable", b =>
@@ -108,7 +108,7 @@ namespace ReservationWorker.Migrations
 
                     b.HasIndex("SectorId");
 
-                    b.ToTable("restaurant_tables");
+                    b.ToTable("restaurant_tables", (string)null);
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.Sector", b =>
@@ -137,7 +137,7 @@ namespace ReservationWorker.Migrations
 
                     b.HasIndex("RestaurantId");
 
-                    b.ToTable("Sectors");
+                    b.ToTable("Sectors", (string)null);
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.TimeSlot", b =>
@@ -152,9 +152,6 @@ namespace ReservationWorker.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
-                    b.Property<Guid?>("RestaurantTableId")
-                        .HasColumnType("uuid");
-
                     b.Property<Guid>("SectorId")
                         .HasColumnType("uuid");
 
@@ -163,11 +160,9 @@ namespace ReservationWorker.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("RestaurantTableId");
-
                     b.HasIndex("SectorId");
 
-                    b.ToTable("TimeSlots");
+                    b.ToTable("TimeSlots", (string)null);
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.RestaurantTable", b =>
@@ -192,27 +187,16 @@ namespace ReservationWorker.Migrations
 
             modelBuilder.Entity("ReservationWorker.Entities.TimeSlot", b =>
                 {
-                    b.HasOne("ReservationWorker.Entities.RestaurantTable", null)
-                        .WithMany("TimeSlots")
-                        .HasForeignKey("RestaurantTableId");
-
-                    b.HasOne("ReservationWorker.Entities.Sector", "Sector")
+                    b.HasOne("ReservationWorker.Entities.Sector", null)
                         .WithMany("TimeSlots")
                         .HasForeignKey("SectorId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("Sector");
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.Restaurant", b =>
                 {
                     b.Navigation("Sectors");
-                });
-
-            modelBuilder.Entity("ReservationWorker.Entities.RestaurantTable", b =>
-                {
-                    b.Navigation("TimeSlots");
                 });
 
             modelBuilder.Entity("ReservationWorker.Entities.Sector", b =>
