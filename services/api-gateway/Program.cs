@@ -145,7 +145,8 @@ app.MapPost("/api/reservations/lock", async ([FromBody] LockRequest req, IConnec
     // NOVO: Se o setor exige mapa e o App tentou dar lock sem mesa
     if (sector.HasMapLayout && !req.RestaurantTableId.HasValue)
     {
-        return Results.Accepted(new 
+        // O primeiro argumento é a URI (Location), passamos null.
+        return Results.Accepted(uri: null, value: new 
         { 
             Action = "OPEN_MAP", 
             Message = "É necessário selecionar mesa no mapa",
