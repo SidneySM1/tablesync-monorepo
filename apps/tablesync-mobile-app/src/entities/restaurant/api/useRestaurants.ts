@@ -1,30 +1,29 @@
 import { api } from '@shared/api/api-client';
-import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Restaurant } from '../model/types';
+import { RestaurantResponse } from '../model/types';
 
 export const useRestaurants = () => {
-  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  const [restaurants, setRestaurants] = useState<RestaurantResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchRestaurants = async () => {
+    try {
+      setIsLoading(true);
+      const res = await api.get<RestaurantResponse[]>('/restaurants');
+      // Garantimos que sempre teremos um array para evitar o crash do .find()
+      setRestaurants(res.data || []);
+    } catch (err) {
+      console.error('[useRestaurants Error]:', err);
+      setError('Erro ao carregar dados de Fortaleza.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Endpoint único que retorna a árvore completa
-    api.get<Restaurant[]>('/restaurants').then(res => {
-      const data = res.data;
-      setRestaurants(data);
-      
-      // Se houver apenas 1, pula direto para a página de setores desse ID
-      if (data.length === 1) {
-        // Usamos replace para não permitir voltar para uma lista vazia
-        router.replace({
-          pathname: '/sectors/[id]',
-          params: { id: data[0].id }
-        });
-      }
-      setIsLoading(false);
-    }).catch(() => setIsLoading(false));
+    fetchRestaurants();
   }, []);
 
-  return { restaurants, isLoading };
+  return { restaurants, isLoading, error, refetch: fetchRestaurants };
 };

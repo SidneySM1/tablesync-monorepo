@@ -1,52 +1,77 @@
 import { useRestaurants } from '@entities/restaurant/api/useRestaurants';
-import { Sector } from '@entities/sector/model/types'; // Importe o tipo Sector
+import { Sector } from '@entities/sector/model/types';
+import { Ionicons } from '@expo/vector-icons';
 import { AppModal } from '@shared/ui/modal/AppModal';
 import { useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'; // Adicionado TouchableOpacity
+import React, { useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export const SectorListPage = () => {
   const { id } = useLocalSearchParams();
-  const { restaurants } = useRestaurants();
-  
-  // CORREÇÃO: Defina o tipo genérico para o useState aceitar um Sector
+  const { restaurants, isLoading } = useRestaurants();
   const [selectedSector, setSelectedSector] = useState<Sector | null>(null);
 
-  // Encontra o restaurante no array vindo do endpoint único /restaurants
-  const restaurant = restaurants.find(r => r.id === id);
+  // Memoizamos a busca para performance e para evitar o crash de 'undefined'
+  const restaurant = useMemo(() => {
+    return restaurants.find(r => r.id === id);
+  }, [restaurants, id]);
 
-  if (!restaurant) return <Text style={styles.loading}>Carregando dados do restaurante...</Text>;
+  if (isLoading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text>Buscando setores...</Text>
+      </View>
+    );
+  }
+
+  if (!restaurant) {
+    return (
+      <View style={styles.center}>
+        <Text>Restaurante não encontrado.</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.restaurantName}>{restaurant.name}</Text>
-      
-      {restaurant.sectors.map(sector => (
-        <View key={sector.id} style={styles.sectorCard}>
-          <View>
-            <Text style={styles.sectorTitle}>{sector.name}</Text>
-            <Text style={styles.sectorType}>{sector.type}</Text>
+      <Text style={styles.headerTitle}>{restaurant.name}</Text>
+      <Text style={styles.subTitle}>Escolha um setor para reservar:</Text>
+
+      {restaurant.sectors.map((sector) => (
+        <TouchableOpacity 
+          key={sector.id} 
+          style={styles.sectorCard}
+          onPress={() => setSelectedSector(sector)}
+        >
+          <View style={styles.sectorInfo}>
+            <View style={styles.iconContainer}>
+               {/* Ícones baseados no tipo do setor */}
+               {sector.type === 'MAP' && <Ionicons name="layers" size={24} color="#007AFF" />}
+               {sector.type === 'AUTO' && <Ionicons name="flash" size={24} color="#FF9500" />}
+               {sector.type === 'STANDING' && <Ionicons name="people" size={24} color="#34C759" />}
+            </View>
+            <View>
+              <Text style={styles.sectorName}>{sector.name}</Text>
+              <Text style={styles.sectorType}>
+                {sector.type === 'MAP' ? 'Mapa de Mesas' : sector.type === 'AUTO' ? 'Alocação Automática' : 'Pista / Lotação'}
+              </Text>
+            </View>
           </View>
-          
-          <TouchableOpacity 
-            style={styles.button} 
-            onPress={() => setSelectedSector(sector)}
-          >
-             <Text style={styles.buttonText}>Ver Horários</Text>
-          </TouchableOpacity>
-        </View>
+          <Ionicons name="chevron-forward" size={20} color="#CCC" />
+        </TouchableOpacity>
       ))}
 
-      {/* Modal Bottom: Ação Simples vinda de baixo */}
+      {/* Modal de Ação Simples (Bottom) */}
       <AppModal 
         type="bottom" 
         visible={!!selectedSector} 
         onClose={() => setSelectedSector(null)}
         title={selectedSector?.name}
       >
-        <View style={styles.modalContent}>
-          <Text>Aqui listaremos os slots de 19h, 21h e 23h conforme o JSON</Text>
-          {/* Próximo passo: Renderizar o TimeSlotPicker aqui dentro */}
+        <View style={styles.modalBody}>
+          <Text style={styles.modalText}>Selecione o horário desejado:</Text>
+          {/* Aqui entrará o seu TimeSlotPicker baseado nos Slots do JSON */}
         </View>
       </AppModal>
     </ScrollView>
@@ -54,22 +79,28 @@ export const SectorListPage = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: '#F5F5F5' },
-  loading: { marginTop: 50, textAlign: 'center' },
-  restaurantName: { fontSize: 26, fontWeight: 'bold', marginBottom: 20, color: '#333' },
-  sectorCard: { 
-    backgroundColor: '#FFF', 
-    padding: 16, 
-    borderRadius: 12, 
-    marginBottom: 12, 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
+  container: { flex: 1, backgroundColor: '#F8F9FA', padding: 16 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#1A1A1A' },
+  subTitle: { fontSize: 16, color: '#666', marginBottom: 20, marginTop: 4 },
+  sectorCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    flexDirection: 'row',
     alignItems: 'center',
-    elevation: 2 
+    justifyContent: 'space-between',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
-  sectorTitle: { fontSize: 18, fontWeight: '600' },
-  sectorType: { fontSize: 14, color: '#666', textTransform: 'uppercase' },
-  button: { backgroundColor: '#007AFF', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8 },
-  buttonText: { color: '#FFF', fontWeight: 'bold' },
-  modalContent: { paddingVertical: 10 }
+  sectorInfo: { flexDirection: 'row', alignItems: 'center' },
+  iconContainer: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F0F7FF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  sectorName: { fontSize: 18, fontWeight: '600', color: '#333' },
+  sectorType: { fontSize: 13, color: '#888', marginTop: 2 },
+  modalBody: { paddingBottom: 20 },
+  modalText: { fontSize: 16, marginBottom: 15, color: '#444' }
 });

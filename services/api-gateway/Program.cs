@@ -25,86 +25,93 @@ app.UseCors();
 // 1. LISTAGEM HÍBRIDA (CÉREBRO NO BACKEND)
 app.MapGet("/api/restaurants", async (ReadOnlyDbContext db, IConnectionMultiplexer redis) =>
 {
-	var redisDb = redis.GetDatabase();
-	var now = DateTime.UtcNow;
-	var today = now.Date;
-	int maxDays = 7;
+    var redisDb = redis.GetDatabase();
+    var now = DateTime.UtcNow;
+    var today = now.Date;
+    int maxDays = 7;
 
-	var restaurant = await db.Restaurants
-		.Include(r => r.Sectors).ThenInclude(s => s.TimeSlots)
-		.Include(r => r.Sectors).ThenInclude(s => s.Tables)
-		.FirstOrDefaultAsync();
+    // 1. Buscamos todos os restaurantes com seus setores, mesas e horários
+    var restaurants = await db.Restaurants
+        .Include(r => r.Sectors).ThenInclude(s => s.TimeSlots)
+        .Include(r => r.Sectors).ThenInclude(s => s.Tables)
+        .ToListAsync();
 
-	if (restaurant == null) return Results.NotFound();
+    if (!restaurants.Any()) return Results.Ok(new List<object>());
 
-	var availableDays = Enumerable.Range(0, maxDays).Select(i => today.AddDays(i)).ToList();
-	var endDate = today.AddDays(maxDays);
-	
-	var reservations = await db.Reservations
-		.Where(res => res.ReservationDate >= today && res.ReservationDate < endDate)
-		.ToListAsync();
+    var availableDays = Enumerable.Range(0, maxDays).Select(i => today.AddDays(i)).ToList();
+    var endDate = today.AddDays(maxDays);
+    
+    // 2. Carregamos as reservas do período para evitar múltiplas consultas ao banco
+    var reservations = await db.Reservations
+        .Where(res => res.ReservationDate >= today && res.ReservationDate < endDate)
+        .ToListAsync();
 
-	var result = new
-	{
-		restaurant.Name,
-		Sectors = restaurant.Sectors.Select(s => new
-		{
-			s.Id,
-			s.Name,
-			Type = s.HasMapLayout ? "MAP" : (s.AllowAnyTable ? "AUTO" : "STANDING"),
-			Days = availableDays.Select(day => new
-			{
-				Date = day.ToString("yyyy-MM-dd"),
-				Label = day.ToString("dd/MM"),
-				DayName = day.ToString("ddd").ToUpper(),
-				Slots = s.TimeSlots.Where(ts => ts.IsActive).OrderBy(ts => ts.StartTime).Select(ts =>
-				{
-					var dt = day.Add(ts.StartTime);
-					bool isPast = day == today && ts.StartTime < now.TimeOfDay;
+    // 3. Mapeamos a lista de restaurantes para o formato esperado pelo Mobile
+    var result = restaurants.Select(restaurant => new
+    {
+        restaurant.Id, // ID fundamental para o router.replace no Expo
+        restaurant.Name,
+        Sectors = restaurant.Sectors.Select(s => new
+        {
+            s.Id,
+            s.Name,
+            // Define o tipo baseado nas flags do banco
+            Type = s.HasMapLayout ? "MAP" : (s.AllowAnyTable ? "AUTO" : "STANDING"),
+            Days = availableDays.Select(day => new
+            {
+                Date = day.ToString("yyyy-MM-dd"),
+                Label = day.ToString("dd/MM"),
+                DayName = day.ToString("ddd").ToUpper(),
+                Slots = s.TimeSlots.Where(ts => ts.IsActive).OrderBy(ts => ts.StartTime).Select(ts =>
+                {
+                    var dt = day.Add(ts.StartTime);
+                    bool isPast = day == today && ts.StartTime < now.TimeOfDay;
 
-					if (!s.HasMapLayout && !s.AllowAnyTable) 
-					{
-						var totalOcupado = reservations.Where(r => r.SectorId == s.Id && r.ReservationDate == dt).Sum(r => r.GuestCount);
-						string standingKey = $"lock:standing:s:{s.Id}:d:{dt:yyyyMMddHHmm}";
-						var redisLocks = redisDb.HashGetAll(standingKey).Sum(h => (int)h.Value);
+                    // CENÁRIO: PISTA (STANDING) - Cálculo por volume
+                    if (!s.HasMapLayout && !s.AllowAnyTable) 
+                    {
+                        var totalOcupado = reservations.Where(r => r.SectorId == s.Id && r.ReservationDate == dt).Sum(r => r.GuestCount);
+                        string standingKey = $"lock:standing:s:{s.Id}:d:{dt:yyyyMMddHHmm}";
+                        var redisLocks = redisDb.HashGetAll(standingKey).Sum(h => (int)h.Value);
 
-						int restante = (s.TotalCapacity ?? 0) - (totalOcupado + (int)redisLocks);
+                        int restante = (s.TotalCapacity ?? 0) - (totalOcupado + (int)redisLocks);
 
-						return (object)new {
-							Time = ts.StartTime.ToString(@"hh\:mm"),
-							Remaining = Math.Max(0, restante),
-							Available = !isPast && restante > 0
-						};
-					}
-					else 
-					{
-						var tablesData = s.Tables.Select(t => {
-							string lockKey = $"lock:t:{t.Id}:d:{dt:yyyyMMddHHmm}";
-							bool isReserved = reservations.Any(r => r.RestaurantTableId == t.Id && r.ReservationDate == dt);
-							bool isLocked = redisDb.KeyExists(lockKey);
+                        return (object)new {
+                            Time = ts.StartTime.ToString(@"hh\:mm"),
+                            Remaining = Math.Max(0, restante),
+                            Available = !isPast && restante > 0
+                        };
+                    }
+                    // CENÁRIO: VIP/DECK (MAP/AUTO) - Cálculo por mesa individual
+                    else 
+                    {
+                        var tablesData = s.Tables.Select(t => {
+                            string lockKey = $"lock:t:{t.Id}:d:{dt:yyyyMMddHHmm}";
+                            bool isReserved = reservations.Any(r => r.RestaurantTableId == t.Id && r.ReservationDate == dt);
+                            bool isLocked = redisDb.KeyExists(lockKey);
 
-							return new {
-								t.Id,
-								t.TableNumber,
-								t.Capacity,
-								t.PositionX,
-								t.PositionY,
-								IsOccupied = isPast || isReserved || isLocked
-							};
-						}).ToList();
+                            return new {
+                                t.Id,
+                                t.TableNumber,
+                                t.Capacity,
+                                t.PositionX,
+                                t.PositionY,
+                                IsOccupied = isPast || isReserved || isLocked
+                            };
+                        }).ToList();
 
-						return new {
-							Time = ts.StartTime.ToString(@"hh\:mm"),
-							Available = !isPast && tablesData.Any(t => !t.IsOccupied),
-							Tables = tablesData
-						};
-					}
-				})
-			})
-		})
-	};
+                        return new {
+                            Time = ts.StartTime.ToString(@"hh\:mm"),
+                            Available = !isPast && tablesData.Any(t => !t.IsOccupied),
+                            Tables = tablesData
+                        };
+                    }
+                })
+            })
+        })
+    });
 
-	return Results.Ok(result);
+    return Results.Ok(result);
 });
 
 // 2. LOCK UNIFICADO (IDEMPOTENTE)

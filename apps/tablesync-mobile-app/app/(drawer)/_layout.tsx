@@ -31,12 +31,11 @@ export default function DrawerLayout() {
       {/* Ocultamos a rota de setores do menu da gaveta, mas mantemos o Header para ela */}
       <Drawer.Screen
         name="sectors/[id]"
-        options={{
-          drawerItemStyle: { display: 'none' }, 
-          title: 'Seleção de Setor',
-          drawerLabel: 'Reservar',
-        }}
-      />
+        options={({ route }) => ({
+            title: (route.params as any)?.name || 'Setores', // Usa o nome que passamos no replace
+            drawerItemStyle: { display: 'none' },
+        })}
+        />
     </Drawer>
   );
 }
