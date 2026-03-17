@@ -1,4 +1,4 @@
-import { SectorListPage } from '../../../src/pages/sector-list/ui/Page';
+import { SectorListPage } from '@pages/sector-list';
 export default function SectorsRoute() {
   return <SectorListPage />;
 }

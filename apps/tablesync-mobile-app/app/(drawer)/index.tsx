@@ -1,4 +1,4 @@
-import { RestaurantListPage } from '../../src/pages/restaurant-list/ui/Page';
+import { RestaurantListPage } from '@pages/restaurant-list';
 export default function HomeRoute() {
   return <RestaurantListPage />;
 }
