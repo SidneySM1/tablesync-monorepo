@@ -117,50 +117,76 @@ app.MapGet("/api/restaurants", async (ReadOnlyDbContext db, IConnectionMultiplex
 // 2. LOCK UNIFICADO (IDEMPOTENTE)
 app.MapPost("/api/reservations/lock", async ([FromBody] LockRequest req, IConnectionMultiplexer redis, ReadOnlyDbContext db) =>
 {
-	var redisDb = redis.GetDatabase();
-	var dt = req.ReservationDate.ToUniversalTime();
+    var redisDb = redis.GetDatabase();
+    var dt = req.ReservationDate.ToUniversalTime();
 
-	if (dt < DateTime.UtcNow) return Results.BadRequest("Horário passado.");
+    // 1. Validação básica de horário
+    if (dt < DateTime.UtcNow) return Results.BadRequest("Não é possível reservar para um horário que já passou.");
 
-	// CENÁRIO 1: Mesa fixa (MAP ou escolha manual)
-	if (req.RestaurantTableId.HasValue)
-	{
-		string lockKey = $"lock:t:{req.RestaurantTableId}:d:{dt:yyyyMMddHHmm}";
-		var currentToken = await redisDb.StringGetAsync(lockKey);
-		if (currentToken.HasValue && currentToken != req.ReservationToken)
-			return Results.Conflict(new { Message = "Mesa ocupada." });
+    // CENÁRIO 1: Seleção Manual de Mesa (Setor MAP ou escolha específica)
+    // Se o Request já traz o ID da mesa, travamos ela diretamente.
+    if (req.RestaurantTableId.HasValue)
+    {
+        string lockKey = $"lock:t:{req.RestaurantTableId}:d:{dt:yyyyMMddHHmm}";
+        var currentToken = await redisDb.StringGetAsync(lockKey);
+        
+        // Se houver um lock e não for o meu próprio token, conflito
+        if (currentToken.HasValue && currentToken != req.ReservationToken)
+            return Results.Conflict(new { Message = "Esta mesa acabou de ser reservada por outra pessoa." });
 
-		await redisDb.StringSetAsync(lockKey, req.ReservationToken, TimeSpan.FromMinutes(5));
-		return Results.Ok(new { TableId = req.RestaurantTableId });
-	}
+        await redisDb.StringSetAsync(lockKey, req.ReservationToken, TimeSpan.FromMinutes(5));
+        return Results.Ok(new { TableId = req.RestaurantTableId, Status = "TableLocked" });
+    }
 
-	// CENÁRIO 2: Setor sem mesa pré-definida (AUTO ou STANDING)
-	var sector = await db.Sectors.Include(s => s.Tables).FirstOrDefaultAsync(s => s.Id == req.SectorId);
-	if (sector == null) return Results.NotFound();
+    // 2. Busca as configurações do setor para decidir a lógica
+    var sector = await db.Sectors.Include(s => s.Tables).FirstOrDefaultAsync(s => s.Id == req.SectorId);
+    if (sector == null) return Results.NotFound("Setor não encontrado.");
 
-	if (sector.AllowAnyTable) // Lógica para o "Deck Externo"
-	{
-		var ocupadasNoDb = await db.Reservations
-			.Where(r => r.SectorId == req.SectorId && r.ReservationDate == dt)
-			.Select(r => r.RestaurantTableId).ToListAsync();
+    // NOVO: Se o setor exige mapa e o App tentou dar lock sem mesa
+    if (sector.HasMapLayout && !req.RestaurantTableId.HasValue)
+    {
+        return Results.Accepted(new 
+        { 
+            Action = "OPEN_MAP", 
+            Message = "É necessário selecionar mesa no mapa",
+            SectorId = sector.Id
+        });
+    }
 
-		// Encontra a primeira mesa que não está no DB nem no Redis
-		var mesaLivre = sector.Tables
-			.Where(t => !ocupadasNoDb.Contains(t.Id))
-			.FirstOrDefault(t => !redisDb.KeyExists($"lock:t:{t.Id}:d:{dt:yyyyMMddHHmm}"));
+    // CENÁRIO 2: Alocação Automática (DECK / AUTO)
+    // O sistema escolhe a primeira mesa livre por você.
+    if (sector.AllowAnyTable) 
+    {
+        var ocupadasNoDb = await db.Reservations
+            .Where(r => r.SectorId == req.SectorId && r.ReservationDate == dt)
+            .Select(r => r.RestaurantTableId).ToListAsync();
 
-		if (mesaLivre == null) return Results.Conflict("Lotação esgotada.");
+        var mesaLivre = sector.Tables
+            .Where(t => !ocupadasNoDb.Contains(t.Id))
+            .FirstOrDefault(t => !redisDb.KeyExists($"lock:t:{t.Id}:d:{dt:yyyyMMddHHmm}"));
 
-		await redisDb.StringSetAsync($"lock:t:{mesaLivre.Id}:d:{dt:yyyyMMddHHmm}", req.ReservationToken, TimeSpan.FromMinutes(5));
-		return Results.Ok(new { TableId = mesaLivre.Id, TableNumber = mesaLivre.TableNumber });
-	}
+        if (mesaLivre == null) return Results.Conflict(new { Message = "Não há mais mesas disponíveis neste setor." });
 
-	// CENÁRIO 3: Pista (STANDING)
-	string standingKey = $"lock:standing:s:{req.SectorId}:d:{dt:yyyyMMddHHmm}";
-	await redisDb.HashSetAsync(standingKey, req.ReservationToken, req.GuestCount);
-	await redisDb.KeyExpireAsync(standingKey, TimeSpan.FromMinutes(5));
+        await redisDb.StringSetAsync($"lock:t:{mesaLivre.Id}:d:{dt:yyyyMMddHHmm}", req.ReservationToken, TimeSpan.FromMinutes(5));
+        return Results.Ok(new { TableId = mesaLivre.Id, TableNumber = mesaLivre.TableNumber, Status = "AutoAllocated" });
+    }
 
-	return Results.Ok(new { Message = "Vaga na pista garantida" });
+    // CENÁRIO 3: Validação de Segurança para VIP (MAP)
+    // Se o setor exige mapa e chegamos aqui sem ID de mesa, há um erro no fluxo do App.
+    if (sector.HasMapLayout)
+    {
+        return Results.BadRequest(new { Message = "Este setor exige a seleção de uma mesa no mapa." });
+    }
+
+    // CENÁRIO 4: Pista (STANDING)
+    // Apenas se NÃO for mapa e NÃO for auto. Lógica por volume de GuestCount.
+    string standingKey = $"lock:standing:s:{req.SectorId}:d:{dt:yyyyMMddHHmm}";
+    
+    // Usamos HashSet para permitir que múltiplos tokens (pessoas) ocupem a pista até o limite
+    await redisDb.HashSetAsync(standingKey, req.ReservationToken, req.GuestCount);
+    await redisDb.KeyExpireAsync(standingKey, TimeSpan.FromMinutes(5));
+
+    return Results.Ok(new { Message = "Vaga na pista garantida temporariamente", Status = "StandingLocked" });
 });
 
 // 3. UNLOCK

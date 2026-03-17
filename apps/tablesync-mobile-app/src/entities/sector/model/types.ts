@@ -31,6 +31,7 @@ export interface Sector {
 }
 
 export interface RestaurantResponse {
+	id: string;
 	name: string;
 	sectors: Sector[];
 }

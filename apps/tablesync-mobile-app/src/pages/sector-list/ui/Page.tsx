@@ -1,8 +1,10 @@
 import { useRestaurants } from '@entities/restaurant/api/useRestaurants';
 import { ReservationDay, Sector, Slot } from '@entities/sector/model/types';
 import { Ionicons } from '@expo/vector-icons';
+import { useReserveTable } from '@features/reserve-table/';
 import { AppModal } from '@shared/ui/modal/AppModal';
 import { TimeSlotPicker } from '@widgets/time-slot-picker/ui/TimeSlotPicker';
+import * as Crypto from 'expo-crypto';
 import { useLocalSearchParams } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -12,10 +14,32 @@ export const SectorListPage = () => {
   const { restaurants, isLoading } = useRestaurants();
   const [selectedSector, setSelectedSector] = useState<Sector | null>(null);
 
-  const handleSlotSelection = (day: ReservationDay, slot: Slot) => {
-    console.log(`Selecionado: ${day.date} às ${slot.time} no setor ${selectedSector?.name}`);
-    // Próximo passo: disparar o lockResource da feature!
-  };
+  const { reserveLock, cancelLock, isLocking, activeLock } = useReserveTable();
+  const [showSummary, setShowSummary] = useState(false);
+
+  const handleSlotSelection = async (day: ReservationDay, slot: Slot) => {
+    if (!selectedSector) return;
+
+    const token = Crypto.randomUUID(); // Gera o token único
+
+    console.log('Attempting to lock resource with token:', token);
+
+    const result = await reserveLock({
+        sectorId: selectedSector.id,
+        restaurantTableId: null, // Pista e Auto começam com null
+        reservationDate: `${day.date}T${slot.time}:00Z`,
+        guestCount: 1, // Valor inicial padrão
+        reservationToken: token,
+    });
+    console.log('Lock Result:', result);
+
+    if (result) {
+        // Se o lock no Redis em Fortaleza funcionou, fechamos o modal de horários
+        // e abrimos o modal central de confirmação
+        setSelectedSector(null);
+        setShowSummary(true);
+    }
+};
 
   // Memoizamos a busca para performance e para evitar o crash de 'undefined'
   const restaurant = useMemo(() => {
