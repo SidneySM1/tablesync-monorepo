@@ -4,7 +4,10 @@
     "strict": true,
     "paths": {
       "@/*": [
-        "./*"
+        "./*",
+      ],
+      "@shared/*": [
+        "./src/shared/*",
       ]
     }
   },
