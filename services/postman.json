@@ -1,0 +1,183 @@
+{
+	"info": {
+		"_postman_id": "8a2b3c4d-5e6f-7g8h-9i0j-k1l2m3n4o5p6",
+		"name": "Tablesync API",
+		"description": "Coleção para testes do motor de reservas Tablesync (Mesas e Pista/Standing).",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Listar Restaurantes e Disponibilidade",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/restaurants",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"restaurants"
+					]
+				},
+				"description": "Retorna a estrutura completa de dias e horários calculada pelo backend."
+			},
+			"response": []
+		},
+		{
+			"name": "2. Lock Mesa (MAP/AUTO)",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n\t\"sectorId\": \"{{sectorId}}\",\n\t\"restaurantTableId\": \"{{tableId}}\",\n\t\"reservationDate\": \"2026-03-20T20:00:00Z\",\n\t\"guestCount\": 2,\n\t\"reservationToken\": \"{{token}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseUrl}}/reservations/lock",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"reservations",
+						"lock"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "3. Lock Pista (STANDING)",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n\t\"sectorId\": \"{{pistaId}}\",\n\t\"restaurantTableId\": null,\n\t\"reservationDate\": \"2026-03-20T23:00:00Z\",\n\t\"guestCount\": 5,\n\t\"reservationToken\": \"{{token}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseUrl}}/reservations/lock",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"reservations",
+						"lock"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "4. Unlock (Desistir)",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n\t\"sectorId\": \"{{sectorId}}\",\n\t\"restaurantTableId\": \"{{tableId}}\",\n\t\"reservationDate\": \"2026-03-20T20:00:00Z\",\n\t\"reservationToken\": \"{{token}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseUrl}}/reservations/lock/unlock",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"reservations",
+						"lock",
+						"unlock"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "5. Confirmar Reserva (RabbitMQ)",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n\t\"reservationId\": \"{{$guid}}\",\n\t\"customerName\": \"Sidney Dev\",\n\t\"customerEmail\": \"sidney@teste.com\",\n\t\"customerPhone\": \"85999999999\",\n\t\"sectorId\": \"{{sectorId}}\",\n\t\"restaurantTableId\": \"{{tableId}}\",\n\t\"guestCount\": 2,\n\t\"reservationDate\": \"2026-03-20T20:00:00Z\",\n\t\"createdAt\": \"2026-03-16T21:40:00Z\",\n\t\"reservationToken\": \"{{token}}\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseUrl}}/reservations",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"reservations"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:5000/api",
+			"type": "string"
+		},
+		{
+			"key": "token",
+			"value": "meu-token-uuid-123",
+			"type": "string"
+		},
+		{
+			"key": "sectorId",
+			"value": "ID_DO_SETOR_AQUI",
+			"type": "string"
+		},
+		{
+			"key": "pistaId",
+			"value": "ID_DA_PISTA_AQUI",
+			"type": "string"
+		},
+		{
+			"key": "tableId",
+			"value": "ID_DA_MESA_AQUI",
+			"type": "string"
+		}
+	]
+}

@@ -49,6 +49,7 @@ export const apiClient = {
   },
 
   getAvailableDates: async (sectorId: string, guestCount: number): Promise<string[]> => {
+    console.log(`Buscando datas disponíveis para setor ${sectorId} e ${guestCount} convidados`);
     const response = await fetch(`${BASE_URL}/sectors/${sectorId}/available-dates?guestCount=${guestCount}`);
     if (!response.ok) throw new Error('Falha ao buscar calendário');
     return response.json();

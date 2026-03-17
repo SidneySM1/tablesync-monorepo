@@ -1,14 +1,16 @@
 namespace ApiGateway.DTOs;
 
 public record LockRequest(
-    Guid RestaurantTableId, 
-    DateTime ReservationDate, 
-    string ClientId
+	Guid SectorId, 
+	Guid? RestaurantTableId, 
+	DateTime ReservationDate, 
+	int GuestCount, 
+	string ReservationToken
 );
 
 public record QuickReserveRequest(
-    int GuestCount,
-    string ClientId, 
-    Guid? SectorId,
-    DateTime? TargetDate
+	int GuestCount,
+	string ReservationToken, 
+	Guid? SectorId = null,
+	DateTime? TargetDate = null
 );
