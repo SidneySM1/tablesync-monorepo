@@ -7,7 +7,9 @@ export interface LockRequest {
 }
 
 export interface LockResponse {
-	message: string;
-	tableId?: string; // O Backend preenche se for AUTO
-	expiresIn: number;
+  action?: string;   // Ex: "OPEN_MAP"
+  message?: string;  // Mensagem vinda do C#
+  tableId?: string;  // UUID da mesa (se houver)
+  tableNumber?: number;
+  reservationToken?: string; // Adicionamos aqui para o state guardar o token usado
 }

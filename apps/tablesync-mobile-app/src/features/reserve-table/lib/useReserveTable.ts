@@ -1,53 +1,50 @@
 import { useCallback, useState } from 'react';
-import { Alert } from 'react-native';
 import { lockResource, unlockResource } from '../api/reservation-api';
 import { LockRequest, LockResponse } from '../model/types';
 
 export const useReserveTable = () => {
-	const [isLocking, setIsLocking] = useState(false);
-	const [activeLock, setActiveLock] = useState<LockResponse | null>(null);
+    const [isLocking, setIsLocking] = useState(false);
+    const [activeLock, setActiveLock] = useState<LockResponse | null>(null);
+    // Guardamos o último request para saber o que cancelar
+    const [lastRequest, setLastRequest] = useState<LockRequest | null>(null);
 
-	/**
-	 * Tenta realizar o lock (Mesa VIP, Deck Auto ou Pista)
-	 */
-	const reserveLock = useCallback(async (request: LockRequest) => {
-		try {
-			setIsLocking(true);
-			
-			// Chama o endpoint unificado da Gateway
-			const response = await lockResource(request);
-			
-			setActiveLock(response);
-			return response;
-		} catch (error: any) {
-			// Trata especificamente o 409 Conflict (Mesa já ocupada ou setor lotado)
-			if (error.response?.status === 409) {
-				Alert.alert('Indisponível', error.response.data.message || 'Este lugar acabou de ser ocupado.');
-			} else {
-				Alert.alert('Erro', 'Não foi possível contactar o servidor em Fortaleza.');
-			}
-			return null;
-		} finally {
-			setIsLocking(false);
-		}
-	}, []);
+    const reserveLock = useCallback(async (request: LockRequest) => {
+        try {
+            setIsLocking(true);
+            const response = await lockResource(request);
+            
+            // Injetamos o token no response caso o C# não devolva, 
+            // para manter o rastreio no front
+            const fullResponse = { ...response, reservationToken: request.reservationToken };
+            
+            setActiveLock(fullResponse);
+            setLastRequest(request); // Salvamos o "contexto" do lock
+            return fullResponse;
+        } catch (error: any) {
+            // ... seu tratamento de erro (409, etc)
+            return null;
+        } finally {
+            setIsLocking(false);
+        }
+    }, []);
 
-	/**
-	 * Cancela o lock se o utilizador desistir ou voltar atrás
-	 */
-	const cancelLock = useCallback(async (request: LockRequest) => {
-		try {
-			await unlockResource(request);
-			setActiveLock(null);
-		} catch (error) {
-			console.error('[Unlock Error]:', error);
-		}
-	}, []);
+    const cancelLock = useCallback(async () => {
+        if (!lastRequest) return;
 
-	return {
-		reserveLock,
-		cancelLock,
-		isLocking,
-		activeLock
-	};
+        try {
+            // Usamos o lastRequest que já tem o setor, mesa e data
+            await unlockResource(lastRequest);
+            setActiveLock(null);
+            setLastRequest(null);
+        } catch (error) {
+            console.error('[Unlock Error]:', error);
+        }
+    }, [lastRequest]);
+
+    return {
+        reserveLock,
+        cancelLock,
+        isLocking,
+        activeLock
+    };
 };
