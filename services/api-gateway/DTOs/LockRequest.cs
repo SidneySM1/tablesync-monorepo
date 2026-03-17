@@ -7,10 +7,3 @@ public record LockRequest(
 	int GuestCount, 
 	string ReservationToken
 );
-
-public record QuickReserveRequest(
-	int GuestCount,
-	string ReservationToken, 
-	Guid? SectorId = null,
-	DateTime? TargetDate = null
-);
