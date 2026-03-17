@@ -1,7 +1,8 @@
 import { useRestaurants } from '@entities/restaurant/api/useRestaurants';
-import { Sector } from '@entities/sector/model/types';
+import { ReservationDay, Sector, Slot } from '@entities/sector/model/types';
 import { Ionicons } from '@expo/vector-icons';
 import { AppModal } from '@shared/ui/modal/AppModal';
+import { TimeSlotPicker } from '@widgets/time-slot-picker/ui/TimeSlotPicker';
 import { useLocalSearchParams } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -10,6 +11,11 @@ export const SectorListPage = () => {
   const { id } = useLocalSearchParams();
   const { restaurants, isLoading } = useRestaurants();
   const [selectedSector, setSelectedSector] = useState<Sector | null>(null);
+
+  const handleSlotSelection = (day: ReservationDay, slot: Slot) => {
+    console.log(`Selecionado: ${day.date} às ${slot.time} no setor ${selectedSector?.name}`);
+    // Próximo passo: disparar o lockResource da feature!
+  };
 
   // Memoizamos a busca para performance e para evitar o crash de 'undefined'
   const restaurant = useMemo(() => {
@@ -39,17 +45,17 @@ export const SectorListPage = () => {
       <Text style={styles.subTitle}>Escolha um setor para reservar:</Text>
 
       {restaurant.sectors.map((sector) => (
-        <TouchableOpacity 
-          key={sector.id} 
+        <TouchableOpacity
+          key={sector.id}
           style={styles.sectorCard}
           onPress={() => setSelectedSector(sector)}
         >
           <View style={styles.sectorInfo}>
             <View style={styles.iconContainer}>
-               {/* Ícones baseados no tipo do setor */}
-               {sector.type === 'MAP' && <Ionicons name="layers" size={24} color="#007AFF" />}
-               {sector.type === 'AUTO' && <Ionicons name="flash" size={24} color="#FF9500" />}
-               {sector.type === 'STANDING' && <Ionicons name="people" size={24} color="#34C759" />}
+              {/* Ícones baseados no tipo do setor */}
+              {sector.type === 'MAP' && <Ionicons name="layers" size={24} color="#007AFF" />}
+              {sector.type === 'AUTO' && <Ionicons name="flash" size={24} color="#FF9500" />}
+              {sector.type === 'STANDING' && <Ionicons name="people" size={24} color="#34C759" />}
             </View>
             <View>
               <Text style={styles.sectorName}>{sector.name}</Text>
@@ -63,16 +69,18 @@ export const SectorListPage = () => {
       ))}
 
       {/* Modal de Ação Simples (Bottom) */}
-      <AppModal 
-        type="bottom" 
-        visible={!!selectedSector} 
+      <AppModal
+        type="bottom"
+        visible={!!selectedSector}
         onClose={() => setSelectedSector(null)}
         title={selectedSector?.name}
       >
-        <View style={styles.modalBody}>
-          <Text style={styles.modalText}>Selecione o horário desejado:</Text>
-          {/* Aqui entrará o seu TimeSlotPicker baseado nos Slots do JSON */}
-        </View>
+        {selectedSector && (
+          <TimeSlotPicker
+            sector={selectedSector}
+            onSelectSlot={handleSlotSelection}
+          />
+        )}
       </AppModal>
     </ScrollView>
   );
