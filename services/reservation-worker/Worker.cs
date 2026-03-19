@@ -16,17 +16,26 @@ public class Worker : BackgroundService
 	private IConnection? _connection;
 	private IChannel? _channel;
 
-	public Worker(ILogger<Worker> logger, IServiceScopeFactory scopeFactory)
+	private readonly IConfiguration _configuration;
+
+	public Worker(ILogger<Worker> logger, IServiceScopeFactory scopeFactory, IConfiguration configuration)
 	{
 		_logger = logger;
 		_scopeFactory = scopeFactory;
+		_configuration = configuration;
 	}
 
 	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 	{
 		_logger.LogInformation("⌛ Worker iniciado. Conectando ao RabbitMQ...");
 
-		var factory = new ConnectionFactory { HostName = "localhost" };
+		// var factory = new ConnectionFactory { HostName = "localhost" };
+		var factory = new ConnectionFactory()
+        {
+            HostName = _configuration["RabbitMQ:Host"] ?? "localhost",
+            UserName = _configuration["RabbitMQ:Username"] ?? "guest",
+            Password = _configuration["RabbitMQ:Password"] ?? "guest"
+        };
 		_connection = await factory.CreateConnectionAsync(stoppingToken);
 		_channel = await _connection.CreateChannelAsync(cancellationToken: stoppingToken);
 
