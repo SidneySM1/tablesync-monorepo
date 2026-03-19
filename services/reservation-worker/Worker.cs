@@ -11,101 +11,115 @@ namespace ReservationWorker;
 
 public class Worker : BackgroundService
 {
-	private readonly ILogger<Worker> _logger;
-	private readonly IServiceScopeFactory _scopeFactory;
-	private IConnection? _connection;
-	private IChannel? _channel;
+    private readonly ILogger<Worker> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IConfiguration _configuration;
+    private IConnection? _connection;
+    private IChannel? _channel;
 
-	private readonly IConfiguration _configuration;
+    public Worker(ILogger<Worker> logger, IServiceScopeFactory scopeFactory, IConfiguration configuration)
+    {
+        _logger = logger;
+        _scopeFactory = scopeFactory;
+        _configuration = configuration;
+    }
 
-	public Worker(ILogger<Worker> logger, IServiceScopeFactory scopeFactory, IConfiguration configuration)
-	{
-		_logger = logger;
-		_scopeFactory = scopeFactory;
-		_configuration = configuration;
-	}
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("⌛ Worker iniciado. Aguardando infraestrutura...");
 
-	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-	{
-		_logger.LogInformation("⌛ Worker iniciado. Conectando ao RabbitMQ...");
-
-		// var factory = new ConnectionFactory { HostName = "localhost" };
-		var factory = new ConnectionFactory()
+        // --- LÓGICA DE RETRY (Resiliência para o Docker) ---
+        var factory = new ConnectionFactory()
         {
-            HostName = _configuration["RabbitMQ:Host"] ?? "localhost",
+            HostName = _configuration["RabbitMQ:Host"] ?? "rabbitmq",
             UserName = _configuration["RabbitMQ:Username"] ?? "guest",
             Password = _configuration["RabbitMQ:Password"] ?? "guest"
         };
-		_connection = await factory.CreateConnectionAsync(stoppingToken);
-		_channel = await _connection.CreateChannelAsync(cancellationToken: stoppingToken);
 
-		await _channel.QueueDeclareAsync("reservation_queue", durable: true, exclusive: false, autoDelete: false, arguments: null, cancellationToken: stoppingToken);
+        while (!stoppingToken.IsCancellationRequested && _connection == null)
+        {
+            try
+            {
+                _connection = await factory.CreateConnectionAsync(stoppingToken);
+                _logger.LogInformation("✅ Conectado ao RabbitMQ com sucesso!");
+            }
+            catch (Exception)
+            {
+                _logger.LogWarning("⚠️ RabbitMQ ainda não está pronto em {Host}. Tentando novamente em 5s...", factory.HostName);
+                await Task.Delay(5000, stoppingToken);
+            }
+        }
 
-		var consumer = new AsyncEventingBasicConsumer(_channel);
-		
-		consumer.ReceivedAsync += async (model, ea) =>
-		{
-			var body = ea.Body.ToArray();
-			var message = Encoding.UTF8.GetString(body);
-			var dto = JsonSerializer.Deserialize<ReservationDTO>(message);
+        if (_connection == null) return;
 
-			if (dto != null)
-			{
-				using var scope = _scopeFactory.CreateScope();
-				var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        _channel = await _connection.CreateChannelAsync(cancellationToken: stoppingToken);
+        await _channel.QueueDeclareAsync("reservation_queue", durable: true, exclusive: false, autoDelete: false, arguments: null, cancellationToken: stoppingToken);
 
-				// 1. IDEMPOTÊNCIA (Essencial para não duplicar reserva se o RabbitMQ falhar)
-				var existe = await db.Reservations.AnyAsync(r => r.Id == dto.ReservationId, stoppingToken);
-				
-				if (existe)
-				{
-					_logger.LogWarning("⚠️ Reserva {Id} já existe. Ignorando.", dto.ReservationId);
-					await _channel.BasicAckAsync(ea.DeliveryTag, false, stoppingToken);
-					return;
-				}
+        var consumer = new AsyncEventingBasicConsumer(_channel);
+        
+        consumer.ReceivedAsync += async (model, ea) =>
+        {
+            try 
+            {
+                var body = ea.Body.ToArray();
+                var message = Encoding.UTF8.GetString(body);
+                var dto = JsonSerializer.Deserialize<ReservationDTO>(message);
 
-				// 2. MAPEAMENTO HÍBRIDO (Mesa ou Setor/Pista)
-				var novaReserva = new Reservation
-				{
-					Id = dto.ReservationId,
-					CustomerName = dto.CustomerName,
-					CustomerEmail = dto.CustomerEmail,
-					CustomerPhone = dto.CustomerPhone,
-					SectorId = dto.SectorId,
-					RestaurantTableId = dto.RestaurantTableId, // NULL se for STANDING
-					GuestCount = dto.GuestCount,
-					ReservationDate = dto.ReservationDate.ToUniversalTime(), 
-					CreatedAt = dto.CreatedAt.ToUniversalTime()
-				};
+                if (dto != null)
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-				try 
-				{
-					db.Reservations.Add(novaReserva);
-					await db.SaveChangesAsync(stoppingToken);
-					_logger.LogInformation("🚀 [GRAVADO] Reserva {Id} no Setor {SectorId}", dto.ReservationId, dto.SectorId);
-				}
-				catch (Exception ex)
-				{
-					_logger.LogError(ex, "❌ Falha ao gravar reserva {Id}", dto.ReservationId);
-					return; // Não dá o Ack para tentar novamente
-				}
-			}
+                    // 1. IDEMPOTÊNCIA
+                    var existe = await db.Reservations.AnyAsync(r => r.Id == dto.ReservationId, stoppingToken);
+                    
+                    if (existe)
+                    {
+                        _logger.LogWarning("⚠️ Reserva {Id} já existe. Ignorando.", dto.ReservationId);
+                        await _channel.BasicAckAsync(ea.DeliveryTag, false, stoppingToken);
+                        return;
+                    }
 
-			await _channel.BasicAckAsync(ea.DeliveryTag, false, stoppingToken);
-		};
+                    // 2. GRAVAÇÃO
+                    var novaReserva = new Reservation
+                    {
+                        Id = dto.ReservationId,
+                        CustomerName = dto.CustomerName,
+                        CustomerEmail = dto.CustomerEmail,
+                        CustomerPhone = dto.CustomerPhone,
+                        SectorId = dto.SectorId,
+                        RestaurantTableId = dto.RestaurantTableId,
+                        GuestCount = dto.GuestCount,
+                        ReservationDate = dto.ReservationDate.ToUniversalTime(), 
+                        CreatedAt = dto.CreatedAt.ToUniversalTime()
+                    };
 
-		await _channel.BasicConsumeAsync("reservation_queue", false, consumer, stoppingToken);
+                    db.Reservations.Add(novaReserva);
+                    await db.SaveChangesAsync(stoppingToken);
+                    _logger.LogInformation("🚀 [GRAVADO] Reserva {Id} no Setor {SectorId}", dto.ReservationId, dto.SectorId);
+                }
 
-		while (!stoppingToken.IsCancellationRequested)
-		{
-			await Task.Delay(1000, stoppingToken);
-		}
-	}
+                await _channel.BasicAckAsync(ea.DeliveryTag, false, stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Falha crítica ao processar mensagem. Re-enfileirando...");
+                // Nack com requeue: true para tentar processar novamente depois
+                await _channel.BasicNackAsync(ea.DeliveryTag, false, requeue: true, stoppingToken);
+            }
+        };
 
-	public override async Task StopAsync(CancellationToken stoppingToken)
-	{
-		if (_channel is not null) await _channel.CloseAsync(stoppingToken);
-		if (_connection is not null) await _connection.CloseAsync(stoppingToken);
-		await base.StopAsync(stoppingToken);
-	}
+        await _channel.BasicConsumeAsync("reservation_queue", false, consumer, stoppingToken);
+
+        // Mantém o worker vivo ouvindo a fila
+        await Task.Delay(Timeout.Infinite, stoppingToken);
+    }
+
+    public override async Task StopAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("🛑 Encerrando Worker...");
+        if (_channel is not null) await _channel.CloseAsync(stoppingToken);
+        if (_connection is not null) await _connection.CloseAsync(stoppingToken);
+        await base.StopAsync(stoppingToken);
+    }
 }
