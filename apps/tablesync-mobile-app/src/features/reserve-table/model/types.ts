@@ -12,4 +12,5 @@ export interface LockResponse {
   tableId?: string;  // UUID da mesa (se houver)
   tableNumber?: number;
   reservationToken?: string; // Adicionamos aqui para o state guardar o token usado
+  sectorId?: string;
 }
