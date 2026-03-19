@@ -1,16 +1,24 @@
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+# Estágio de Build usando o SDK 10.0
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
-# Copia o .csproj e restaura (ajuste o nome para cada serviço)
-COPY *.csproj ./
-RUN dotnet restore
+# 1. Copia os arquivos de projeto (Preserva o cache do restore)
+COPY ["services/api-gateway/ApiGateway.csproj", "services/api-gateway/"]
+COPY ["shared-contracts/SharedContracts.csproj", "shared-contracts/"]
 
-# Copia o resto e publica
-COPY . ./
-RUN dotnet publish -c Release -o /app/publish
+# 2. Restaura as dependências (apontando para o projeto principal)
+RUN dotnet restore "services/api-gateway/ApiGateway.csproj"
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+# 3. Copia o código fonte de ambos os diretórios
+COPY services/api-gateway/ services/api-gateway/
+COPY shared-contracts/ shared-contracts/
+
+# 4. Compila e publica
+WORKDIR "/src/services/api-gateway"
+RUN dotnet publish "ApiGateway.csproj" -c Release -o /app/publish
+
+# Estágio de Runtime com ASP.NET 10.0
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
-
-ENTRYPOINT ["dotnet", "api-gateway.dll"]
+ENTRYPOINT ["dotnet", "ApiGateway.dll"]

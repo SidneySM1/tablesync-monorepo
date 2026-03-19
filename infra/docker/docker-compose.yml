@@ -24,8 +24,8 @@ services:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
     ports:
-      - "5672:5672"   # Porta de comunicação da API/Worker
-      - "15672:15672" # Porta do painel visual (Management UI)
+      - "5672:5672"
+      - "15672:15672"
     networks:
       - tablesync-network
 
@@ -38,8 +38,42 @@ services:
     networks:
       - tablesync-network
 
+  # 4. API Gateway (.NET)
+  api-gateway:
+    build:
+      context: ../../
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: ts-api-gateway
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "5000:8080" # Acesso externo via porta 5000
+    environment:
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=tablesync_db;Username=admin;Password=secretpassword
+      - Redis__ConnectionString=redis:6379
+    networks:
+      - tablesync-network
+
+  # 5. Reservation Worker (.NET)
+  reservation-worker:
+    build:
+      context: ../../
+      dockerfile: services/reservation-worker/Dockerfile
+    container_name: ts-reservation-worker
+    depends_on:
+      - rabbitmq
+      - postgres
+    environment:
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=tablesync_db;Username=admin;Password=secretpassword
+      - RabbitMQ__Host=rabbitmq
+      - RabbitMQ__Username=guest
+      - RabbitMQ__Password=guest
+    networks:
+      - tablesync-network
+
 volumes:
-  postgres_data: # Persiste os dados do Postgres mesmo que o contentor vá abaixo
+  postgres_data:
 
 networks:
   tablesync-network:
