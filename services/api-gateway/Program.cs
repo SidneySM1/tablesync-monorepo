@@ -10,14 +10,25 @@ using ApiGateway.DTOs;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// --- CONFIGURAÇÃO DE INFRAESTRUTURA (DOCKER) ---
+
 builder.Services.AddCors(options => options.AddDefaultPolicy(p => 
 	p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
+// 1. REDIS COM RESILIÊNCIA
+var redisConnectionString = builder.Configuration["Redis__ConnectionString"] ?? "redis:6379";
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp => 
-	ConnectionMultiplexer.Connect("localhost:6379"));
+{
+    var options = ConfigurationOptions.Parse(redisConnectionString);
+    options.AbortOnConnectFail = false; // Permite que a API espere o Redis subir no Docker
+    return ConnectionMultiplexer.Connect(options);
+});
 
+// 2. POSTGRESQL (Host=postgres conforme o docker-compose)
+var dbConnectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
+                         ?? "Host=postgres;Database=tablesync_db;Username=admin;Password=secretpassword";
 builder.Services.AddDbContext<ReadOnlyDbContext>(options =>
-	options.UseNpgsql("Host=localhost;Database=tablesync_db;Username=admin;Password=secretpassword"));
+	options.UseNpgsql(dbConnectionString));
 
 var app = builder.Build();
 app.UseCors();
@@ -30,7 +41,6 @@ app.MapGet("/api/restaurants", async (ReadOnlyDbContext db, IConnectionMultiplex
     var today = now.Date;
     int maxDays = 7;
 
-    // 1. Buscamos todos os restaurantes com seus setores, mesas e horários
     var restaurants = await db.Restaurants
         .Include(r => r.Sectors).ThenInclude(s => s.TimeSlots)
         .Include(r => r.Sectors).ThenInclude(s => s.Tables)
@@ -41,21 +51,18 @@ app.MapGet("/api/restaurants", async (ReadOnlyDbContext db, IConnectionMultiplex
     var availableDays = Enumerable.Range(0, maxDays).Select(i => today.AddDays(i)).ToList();
     var endDate = today.AddDays(maxDays);
     
-    // 2. Carregamos as reservas do período para evitar múltiplas consultas ao banco
     var reservations = await db.Reservations
         .Where(res => res.ReservationDate >= today && res.ReservationDate < endDate)
         .ToListAsync();
 
-    // 3. Mapeamos a lista de restaurantes para o formato esperado pelo Mobile
     var result = restaurants.Select(restaurant => new
     {
-        restaurant.Id, // ID fundamental para o router.replace no Expo
+        restaurant.Id,
         restaurant.Name,
         Sectors = restaurant.Sectors.Select(s => new
         {
             s.Id,
             s.Name,
-            // Define o tipo baseado nas flags do banco
             Type = s.HasMapLayout ? "MAP" : (s.AllowAnyTable ? "AUTO" : "STANDING"),
             Days = availableDays.Select(day => new
             {
@@ -67,13 +74,11 @@ app.MapGet("/api/restaurants", async (ReadOnlyDbContext db, IConnectionMultiplex
                     var dt = day.Add(ts.StartTime);
                     bool isPast = day == today && ts.StartTime < now.TimeOfDay;
 
-                    // CENÁRIO: PISTA (STANDING) - Cálculo por volume
                     if (!s.HasMapLayout && !s.AllowAnyTable) 
                     {
                         var totalOcupado = reservations.Where(r => r.SectorId == s.Id && r.ReservationDate == dt).Sum(r => r.GuestCount);
                         string standingKey = $"lock:standing:s:{s.Id}:d:{dt:yyyyMMddHHmm}";
                         var redisLocks = redisDb.HashGetAll(standingKey).Sum(h => (int)h.Value);
-
                         int restante = (s.TotalCapacity ?? 0) - (totalOcupado + (int)redisLocks);
 
                         return (object)new {
@@ -82,20 +87,14 @@ app.MapGet("/api/restaurants", async (ReadOnlyDbContext db, IConnectionMultiplex
                             Available = !isPast && restante > 0
                         };
                     }
-                    // CENÁRIO: VIP/DECK (MAP/AUTO) - Cálculo por mesa individual
                     else 
                     {
                         var tablesData = s.Tables.Select(t => {
                             string lockKey = $"lock:t:{t.Id}:d:{dt:yyyyMMddHHmm}";
                             bool isReserved = reservations.Any(r => r.RestaurantTableId == t.Id && r.ReservationDate == dt);
                             bool isLocked = redisDb.KeyExists(lockKey);
-
                             return new {
-                                t.Id,
-                                t.TableNumber,
-                                t.Capacity,
-                                t.PositionX,
-                                t.PositionY,
+                                t.Id, t.TableNumber, t.Capacity, t.PositionX, t.PositionY,
                                 IsOccupied = isPast || isReserved || isLocked
                             };
                         }).ToList();
@@ -110,84 +109,57 @@ app.MapGet("/api/restaurants", async (ReadOnlyDbContext db, IConnectionMultiplex
             })
         })
     });
-
     return Results.Ok(result);
 });
 
-// 2. LOCK UNIFICADO (IDEMPOTENTE)
+// 2. LOCK UNIFICADO
 app.MapPost("/api/reservations/lock", async ([FromBody] LockRequest req, IConnectionMultiplexer redis, ReadOnlyDbContext db) =>
 {
     var redisDb = redis.GetDatabase();
     var dt = req.ReservationDate.ToUniversalTime();
 
-    // 1. Validação básica de horário
-    if (dt < DateTime.UtcNow) return Results.BadRequest("Não é possível reservar para um horário que já passou.");
+    if (dt < DateTime.UtcNow) return Results.BadRequest("Horário expirado.");
 
-    // CENÁRIO 1: Seleção Manual de Mesa (Setor MAP ou escolha específica)
-    // Se o Request já traz o ID da mesa, travamos ela diretamente.
     if (req.RestaurantTableId.HasValue)
     {
         string lockKey = $"lock:t:{req.RestaurantTableId}:d:{dt:yyyyMMddHHmm}";
         var currentToken = await redisDb.StringGetAsync(lockKey);
-        
-        // Se houver um lock e não for o meu próprio token, conflito
         if (currentToken.HasValue && currentToken != req.ReservationToken)
-            return Results.Conflict(new { Message = "Esta mesa acabou de ser reservada por outra pessoa." });
+            return Results.Conflict(new { Message = "Mesa ocupada." });
 
         await redisDb.StringSetAsync(lockKey, req.ReservationToken, TimeSpan.FromMinutes(5));
-        return Results.Ok(new { TableId = req.RestaurantTableId, Status = "TableLocked" });
+        return Results.Ok(new { TableId = req.RestaurantTableId, Status = "TableLocked", ReservationDate = dt });
     }
 
-    // 2. Busca as configurações do setor para decidir a lógica
     var sector = await db.Sectors.Include(s => s.Tables).FirstOrDefaultAsync(s => s.Id == req.SectorId);
-    if (sector == null) return Results.NotFound("Setor não encontrado.");
+    if (sector == null) return Results.NotFound("Setor inexistente.");
 
-    // NOVO: Se o setor exige mapa e o App tentou dar lock sem mesa
     if (sector.HasMapLayout && !req.RestaurantTableId.HasValue)
     {
-        // O primeiro argumento é a URI (Location), passamos null.
         return Results.Accepted(uri: null, value: new 
         { 
             Action = "OPEN_MAP", 
-            Message = "É necessário selecionar mesa no mapa",
-            SectorId = sector.Id
+            Message = "Selecione no mapa",
+            SectorId = sector.Id,
+            ReservationDate = dt
         });
     }
 
-    // CENÁRIO 2: Alocação Automática (DECK / AUTO)
-    // O sistema escolhe a primeira mesa livre por você.
     if (sector.AllowAnyTable) 
     {
-        var ocupadasNoDb = await db.Reservations
-            .Where(r => r.SectorId == req.SectorId && r.ReservationDate == dt)
-            .Select(r => r.RestaurantTableId).ToListAsync();
-
-        var mesaLivre = sector.Tables
-            .Where(t => !ocupadasNoDb.Contains(t.Id))
-            .FirstOrDefault(t => !redisDb.KeyExists($"lock:t:{t.Id}:d:{dt:yyyyMMddHHmm}"));
-
-        if (mesaLivre == null) return Results.Conflict(new { Message = "Não há mais mesas disponíveis neste setor." });
+        var ocupadasNoDb = await db.Reservations.Where(r => r.SectorId == req.SectorId && r.ReservationDate == dt).Select(r => r.RestaurantTableId).ToListAsync();
+        var mesaLivre = sector.Tables.Where(t => !ocupadasNoDb.Contains(t.Id)).FirstOrDefault(t => !redisDb.KeyExists($"lock:t:{t.Id}:d:{dt:yyyyMMddHHmm}"));
+        if (mesaLivre == null) return Results.Conflict(new { Message = "Sem mesas no setor." });
 
         await redisDb.StringSetAsync($"lock:t:{mesaLivre.Id}:d:{dt:yyyyMMddHHmm}", req.ReservationToken, TimeSpan.FromMinutes(5));
-        return Results.Ok(new { TableId = mesaLivre.Id, TableNumber = mesaLivre.TableNumber, Status = "AutoAllocated" });
+        return Results.Ok(new { TableId = mesaLivre.Id, TableNumber = mesaLivre.TableNumber, Status = "AutoAllocated", ReservationDate = dt });
     }
 
-    // CENÁRIO 3: Validação de Segurança para VIP (MAP)
-    // Se o setor exige mapa e chegamos aqui sem ID de mesa, há um erro no fluxo do App.
-    if (sector.HasMapLayout)
-    {
-        return Results.BadRequest(new { Message = "Este setor exige a seleção de uma mesa no mapa." });
-    }
-
-    // CENÁRIO 4: Pista (STANDING)
-    // Apenas se NÃO for mapa e NÃO for auto. Lógica por volume de GuestCount.
     string standingKey = $"lock:standing:s:{req.SectorId}:d:{dt:yyyyMMddHHmm}";
-    
-    // Usamos HashSet para permitir que múltiplos tokens (pessoas) ocupem a pista até o limite
     await redisDb.HashSetAsync(standingKey, req.ReservationToken, req.GuestCount);
     await redisDb.KeyExpireAsync(standingKey, TimeSpan.FromMinutes(5));
 
-    return Results.Ok(new { Message = "Vaga na pista garantida temporariamente", Status = "StandingLocked" });
+    return Results.Ok(new { Message = "Vaga na pista garantida", Status = "StandingLocked", ReservationDate = dt });
 });
 
 // 3. UNLOCK
@@ -195,36 +167,29 @@ app.MapPost("/api/reservations/lock/unlock", async ([FromBody] LockRequest req, 
 {
 	var redisDb = redis.GetDatabase();
 	var dt = req.ReservationDate.ToUniversalTime();
-
-	if (req.RestaurantTableId.HasValue)
-	{
+	if (req.RestaurantTableId.HasValue) {
 		string lockKey = $"lock:t:{req.RestaurantTableId}:d:{dt:yyyyMMddHHmm}";
-		if (await redisDb.StringGetAsync(lockKey) == req.ReservationToken)
-			await redisDb.KeyDeleteAsync(lockKey);
-	}
-	else
-	{
+		if (await redisDb.StringGetAsync(lockKey) == req.ReservationToken) await redisDb.KeyDeleteAsync(lockKey);
+	} else {
 		string standingKey = $"lock:standing:s:{req.SectorId}:d:{dt:yyyyMMddHHmm}";
 		await redisDb.HashDeleteAsync(standingKey, req.ReservationToken);
 	}
-
 	return Results.Ok();
 });
 
-// 4. CONFIRMAÇÃO (RABBITMQ)
-app.MapPost("/api/reservations", async ([FromBody] ReservationDTO res) =>
+// 4. CONFIRMAÇÃO (RABBITMQ - Host=rabbitmq conforme docker-compose)
+app.MapPost("/api/reservations", async ([FromBody] ReservationDTO res, IConfiguration config) =>
 {
-	var factory = new ConnectionFactory { HostName = "localhost" };
+    var rabbitHost = config["RabbitMQ__Host"] ?? "rabbitmq";
+	var factory = new ConnectionFactory { HostName = rabbitHost };
 	await using var connection = await factory.CreateConnectionAsync();
 	await using var channel = await connection.CreateChannelAsync();
 	
 	await channel.QueueDeclareAsync("reservation_queue", true, false, false, null);
-
 	var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(res));
 	await channel.BasicPublishAsync(string.Empty, "reservation_queue", body);
 	
-	// FIX: Corrigido o erro de sintaxe do Accepted
-	return Results.Accepted("", new { Message = "Processando reserva...", Id = res.ReservationId });
+	return Results.Accepted(uri: null, value: new { Message = "Processando...", Id = res.ReservationId });
 });
 
 app.Run();
