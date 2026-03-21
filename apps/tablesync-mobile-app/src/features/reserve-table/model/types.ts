@@ -1,16 +1,18 @@
 export interface LockRequest {
-	sectorId: string;
-	restaurantTableId: string | null; // null para Pista ou Alocação Automática
-	reservationDate: string; // ISO String
-	guestCount: number;
-	reservationToken: string; // O UUID gerado no App para a sessão
+  sectorId: string;
+  restaurantTableId: string | null;
+  reservationDate: string; 
+  guestCount: number;
+  reservationToken: string; 
 }
 
 export interface LockResponse {
-  action?: string;   // Ex: "OPEN_MAP"
-  message?: string;  // Mensagem vinda do C#
-  tableId?: string;  // UUID da mesa (se houver)
+  action?: string;   
+  message?: string;  
+  tableId?: string;  
   tableNumber?: number;
-  reservationToken?: string; // Adicionamos aqui para o state guardar o token usado
+  reservationToken?: string; 
   sectorId?: string;
+  // ADICIONE ESTA LINHA ABAIXO:
+  reservationDate?: string; // ISO String vinda do C#
 }

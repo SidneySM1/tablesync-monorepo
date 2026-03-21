@@ -15,6 +15,7 @@ import {
 import { useRestaurants } from '@entities/restaurant/api/useRestaurants';
 import { ReservationDay, Sector, Slot, Table } from '@entities/sector';
 import { useReserveTable } from '@features/reserve-table';
+import { confirmReservation } from '@features/confirm-reservation/api/confirm-api';
 
 // UI Components
 import { AppModal } from '@shared/ui/modal/AppModal';
@@ -24,21 +25,22 @@ import { TimeSlotPicker } from '@widgets/time-slot-picker';
 
 export const SectorListPage = () => {
   const { id } = useLocalSearchParams();
-  const { restaurants, isLoading } = useRestaurants();
   
-  // Estados de Navegação e Seleção
+  // 1. Obtemos o 'refetch' para atualizar a UI após a reserva no Postgres
+  const { restaurants, isLoading, refetch } = useRestaurants();
+  
   const [viewMode, setViewMode] = useState<'LIST' | 'MAP'>('LIST');
   const [selectedSector, setSelectedSector] = useState<Sector | null>(null);
   const [selectedDay, setSelectedDay] = useState<ReservationDay | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
   
-  // Estado para a "Mesa Selecionada" antes da confirmação final no rodapé
   const [tempSelectedTable, setTempSelectedTable] = useState<Table | null>(null);
   const [showSummary, setShowSummary] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Hook centralizado que gere os estados de bloqueio no Redis
   const { reserveLock, cancelLock, isLocking, activeLock } = useReserveTable();
 
-  // Encontra o restaurante atual
   const restaurant = useMemo(() => {
     return restaurants.find(r => r.id === id);
   }, [restaurants, id]);
@@ -51,7 +53,6 @@ export const SectorListPage = () => {
 
     const token = Crypto.randomUUID();
     
-    // Tenta o lock inicial (sem mesa ainda)
     const result = await reserveLock({
       sectorId: selectedSector.id,
       restaurantTableId: null,
@@ -60,20 +61,17 @@ export const SectorListPage = () => {
       reservationToken: token,
     });
 
-    // Se o C# responder OPEN_MAP (Status 202)
     if (result?.action === "OPEN_MAP") {
       setSelectedDay(day);
       setSelectedSlot(slot);
       setViewMode('MAP');
-      setSelectedSector(null); 
+      // Mantemos o selectedSector ativo para não perder o ID no próximo clique
       return;
     }
 
     if (result) {
-      // Caso Pista ou Auto (Lock direto)
       setSelectedDay(day);
       setSelectedSlot(slot);
-      setSelectedSector(null);
       setShowSummary(true);
     }
   };
@@ -84,6 +82,13 @@ export const SectorListPage = () => {
   const handleConfirmMapSelection = async () => {
     if (!tempSelectedTable || !selectedDay || !selectedSlot) return;
 
+    // Se o usuário clicar em confirmar na mesa que JÁ está bloqueada por ele
+    if (activeLock?.tableId === tempSelectedTable.id) {
+      setShowSummary(true);
+      return;
+    }
+
+    // Tenta o lock da nova mesa (o hook cuidará de cancelar a anterior)
     const result = await reserveLock({
       sectorId: selectedSector?.id || activeLock?.sectorId || '',
       restaurantTableId: tempSelectedTable.id,
@@ -95,6 +100,54 @@ export const SectorListPage = () => {
     if (result) setShowSummary(true);
   };
 
+  /**
+   * FLUXO 3: Submissão Final (Checkout para o RabbitMQ)
+   */
+  const handleFinalSubmit = async (customer: { name: string; phone: string }) => {
+    if (!activeLock) return;
+
+    try {
+      setIsSubmitting(true);
+      
+      // Utilizamos o serviço de confirmação que já está configurado com a API base
+      await confirmReservation({
+        reservationId: Crypto.randomUUID(),
+        customerName: customer.name,
+        customerPhone: customer.phone,
+        customerEmail: "cliente@tablesync.com",
+        sectorId: activeLock.sectorId || selectedSector?.id || '',
+        restaurantTableId: activeLock.tableId || null,
+        guestCount: 1,
+        reservationDate: activeLock.reservationDate || '', 
+        createdAt: new Date().toISOString(),
+        reservationToken: activeLock.reservationToken || ''
+      });
+
+      Alert.alert("Reserva Solicitada", "A sua vaga está garantida!");
+      setShowSummary(false);
+      setViewMode('LIST');
+      setTempSelectedTable(null);
+      setSelectedSector(null);
+
+      // Sincroniza o telemóvel com o estado real do Postgres
+      if (refetch) refetch(); 
+
+    } catch (error) {
+      Alert.alert("Erro", "Falha na ligação com o servidor Gateway.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  /**
+   * FLUXO 4: Voltar e Liberar (Limpeza preventiva do Redis)
+   */
+  const handleGoBack = async () => {
+    if (activeLock) await cancelLock();
+    setTempSelectedTable(null);
+    setViewMode('LIST');
+  };
+
   if (isLoading) return (
     <View style={styles.centered}><ActivityIndicator size="large" color="#2563EB" /></View>
   );
@@ -103,17 +156,17 @@ export const SectorListPage = () => {
     <View style={styles.centered}><Text>Restaurante não encontrado.</Text></View>
   );
 
-  // --- MODO MAPA (Visual do App Antigo) ---
+  // --- RENDER: MODO MAPA ---
   if (viewMode === 'MAP' && selectedSlot) {
     return (
       <View style={styles.container}>
         <View style={styles.mapHeader}>
-          <TouchableOpacity onPress={() => setViewMode('LIST')} style={styles.backBtn}>
-            <Text style={styles.backBtnText}>← Voltar</Text>
+          <TouchableOpacity onPress={handleGoBack} style={styles.backBtn}>
+            <Text style={styles.backBtnText}>← Voltar e Liberar</Text>
           </TouchableOpacity>
           <Text style={styles.title}>{selectedSector?.name || restaurant.name}</Text>
-          <Text style={styles.subtitle}>
-            {selectedDay?.label} às {selectedSlot.time} — toque numa mesa
+          <Text style={styles.subTitle}>
+            {selectedDay?.label} às {selectedSlot.time} — selecione uma mesa
           </Text>
         </View>
 
@@ -125,14 +178,13 @@ export const SectorListPage = () => {
           />
         </View>
 
-        {/* Footer Bar de Confirmação */}
         <View style={styles.footerBar}>
           <View>
             <Text style={styles.footerTitle}>
               {tempSelectedTable ? `Mesa ${tempSelectedTable.tableNumber}` : 'Nenhuma mesa'}
             </Text>
             <Text style={styles.footerSubtitle}>
-              {tempSelectedTable ? `Capacidade: ${tempSelectedTable.capacity} pessoas` : 'Selecione para continuar'}
+              {tempSelectedTable ? `Capacidade: ${tempSelectedTable.capacity} pessoas` : 'Toque no mapa'}
             </Text>
           </View>
           <TouchableOpacity
@@ -147,15 +199,16 @@ export const SectorListPage = () => {
         <AppModal type="center" visible={showSummary} onClose={() => setShowSummary(false)}>
            <ReservationConfirmationForm 
              lockData={activeLock}
-             onCancel={async () => { setShowSummary(false); await cancelLock(); }}
-             onConfirm={() => { Alert.alert("Sucesso", "Enviado para processamento!"); setShowSummary(false); setViewMode('LIST'); }}
+             loading={isSubmitting}
+             onCancel={async () => { setShowSummary(false); await cancelLock(); setTempSelectedTable(null); }}
+             onConfirm={handleFinalSubmit}
            />
         </AppModal>
       </View>
     );
   }
 
-  // --- MODO LISTA DE SETORES ---
+  // --- RENDER: LISTA DE SETORES ---
   return (
     <View style={styles.container}>
       <ScrollView style={styles.listContent}>
@@ -186,7 +239,6 @@ export const SectorListPage = () => {
         ))}
       </ScrollView>
 
-      {/* Picker de Horários (Bottom) */}
       <AppModal
         type="bottom"
         visible={!!selectedSector}
@@ -198,12 +250,12 @@ export const SectorListPage = () => {
         )}
       </AppModal>
 
-      {/* Modal Final para Pista/Auto */}
       <AppModal type="center" visible={showSummary} onClose={() => setShowSummary(false)}>
          <ReservationConfirmationForm 
             lockData={activeLock}
+            loading={isSubmitting}
             onCancel={async () => { setShowSummary(false); await cancelLock(); }}
-            onConfirm={() => { Alert.alert("Sucesso", "Reserva em análise!"); setShowSummary(false); }}
+            onConfirm={handleFinalSubmit}
          />
       </AppModal>
     </View>
@@ -216,8 +268,6 @@ const styles = StyleSheet.create({
   listContent: { padding: 20 },
   headerTitle: { fontSize: 26, fontWeight: 'bold', color: '#111827' },
   subTitle: { fontSize: 15, color: '#6B7280', marginBottom: 25, marginTop: 4 },
-  
-  // Estilo dos Cards (Lista)
   sectorCard: {
     backgroundColor: '#FFF', borderRadius: 16, padding: 20, marginBottom: 15,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -228,16 +278,11 @@ const styles = StyleSheet.create({
   iconBox: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#F9FAFB', justifyContent: 'center', alignItems: 'center', marginRight: 15 },
   sectorName: { fontSize: 18, fontWeight: '700', color: '#1F2937' },
   sectorType: { fontSize: 13, color: '#9CA3AF', marginTop: 2 },
-
-  // Estilo do Mapa (Inspirado no Antigo)
   mapHeader: { padding: 20, paddingTop: 50, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
   backBtn: { marginBottom: 8 },
   backBtnText: { color: '#2563EB', fontSize: 16, fontWeight: '600' },
   title: { fontSize: 22, fontWeight: 'bold', color: '#111827' },
-  subtitle: { fontSize: 13, color: '#6B7280', marginTop: 2 },
   mapArea: { flex: 1 },
-
-  // Footer Bar (Igual ao Antigo)
   footerBar: { 
     backgroundColor: '#FFF', paddingHorizontal: 20, paddingVertical: 20, paddingBottom: 35,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
@@ -248,5 +293,5 @@ const styles = StyleSheet.create({
   footerSubtitle: { fontSize: 13, color: '#6B7280' },
   continueButton: { backgroundColor: '#111827', paddingHorizontal: 25, paddingVertical: 14, borderRadius: 12 },
   continueButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 15 },
-  btnDisabled: { backgroundColor: '#E5E7EB' }
+  btnDisabled: { backgroundColor: '#E5E7EB' },
 });

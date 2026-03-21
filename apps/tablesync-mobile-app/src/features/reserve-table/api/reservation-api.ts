@@ -9,3 +9,8 @@ export const lockResource = async (data: LockRequest) => {
 export const unlockResource = async (data: LockRequest) => {
 	return await api.post('/reservations/lock/unlock', data);
 };
+
+// NOVO: Centraliza a chamada para o RabbitMQ via Gateway
+export const createReservation = async (data: any) => {
+    return await api.post('/reservations', data);
+};

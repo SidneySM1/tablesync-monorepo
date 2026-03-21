@@ -118,17 +118,20 @@ app.MapPost("/api/reservations/lock", async ([FromBody] LockRequest req, IConnec
     var redisDb = redis.GetDatabase();
     var dt = req.ReservationDate.ToUniversalTime();
 
-    if (dt < DateTime.UtcNow) return Results.BadRequest("Horário expirado.");
+    if (dt.AddMinutes(15) < DateTime.UtcNow) 
+        return Results.BadRequest("Este horário já passou.");
 
     if (req.RestaurantTableId.HasValue)
     {
         string lockKey = $"lock:t:{req.RestaurantTableId}:d:{dt:yyyyMMddHHmm}";
         var currentToken = await redisDb.StringGetAsync(lockKey);
+        
+        // Se a mesa estiver bloqueada por OUTRO token
         if (currentToken.HasValue && currentToken != req.ReservationToken)
-            return Results.Conflict(new { Message = "Mesa ocupada." });
+            return Results.Conflict(new { Message = "Mesa ocupada por outro cliente." });
 
         await redisDb.StringSetAsync(lockKey, req.ReservationToken, TimeSpan.FromMinutes(5));
-        return Results.Ok(new { TableId = req.RestaurantTableId, Status = "TableLocked", ReservationDate = dt });
+        return Results.Ok(new { TableId = req.RestaurantTableId, Status = "TableLocked", ReservationDate = dt, SectorId = req.SectorId });
     }
 
     var sector = await db.Sectors.Include(s => s.Tables).FirstOrDefaultAsync(s => s.Id == req.SectorId);

@@ -1,12 +1,23 @@
 export interface ReservationRequest {
-	reservationId: string;    // Guid gerado no App
+	reservationId: string;
 	customerName: string;
 	customerEmail: string;
 	customerPhone: string;
-	sectorId: string;         // Obrigatório na nova arquitetura
-	restaurantTableId: string | null; // null se for STANDING
+	sectorId: string;
+	restaurantTableId: string | null;
 	guestCount: number;
-	reservationDate: string;  // ISO String
-	createdAt: string;        // ISO String
-	reservationToken: string; // O token usado no /lock para validar a posse
+	reservationDate: string;
+	createdAt: string;
+	reservationToken: string;
+}
+
+export interface LockResponse {
+  action?: string;
+  message?: string;
+  tableId?: string;
+  tableNumber?: number;
+  reservationToken?: string;
+  sectorId?: string;
+  // ADICIONADO: Essencial para o checkout
+  reservationDate?: string; 
 }
