@@ -17,6 +17,9 @@ public class Worker : BackgroundService
     private IConnection? _connection;
     private IChannel? _channel;
 
+    // Lógica de JSON centralizada para performance e consistência
+    private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
+
     public Worker(ILogger<Worker> logger, IServiceScopeFactory scopeFactory, IConfiguration configuration)
     {
         _logger = logger;
@@ -28,7 +31,6 @@ public class Worker : BackgroundService
     {
         _logger.LogInformation("⌛ Worker iniciado. Aguardando infraestrutura...");
 
-        // --- LÓGICA DE RETRY (Resiliência para o Docker) ---
         var factory = new ConnectionFactory()
         {
             HostName = _configuration["RabbitMQ:Host"] ?? "rabbitmq",
@@ -45,7 +47,7 @@ public class Worker : BackgroundService
             }
             catch (Exception)
             {
-                _logger.LogWarning("⚠️ RabbitMQ ainda não está pronto em {Host}. Tentando novamente em 5s...", factory.HostName);
+                _logger.LogWarning("⚠️ RabbitMQ ainda não está pronto. Tentando novamente em 5s...");
                 await Task.Delay(5000, stoppingToken);
             }
         }
@@ -63,14 +65,15 @@ public class Worker : BackgroundService
             {
                 var body = ea.Body.ToArray();
                 var message = Encoding.UTF8.GetString(body);
-                var dto = JsonSerializer.Deserialize<ReservationDTO>(message);
+                
+                // CORREÇÃO: Adicionado _jsonOptions para aceitar camelCase do Mobile
+                var dto = JsonSerializer.Deserialize<ReservationDTO>(message, _jsonOptions);
 
                 if (dto != null)
                 {
                     using var scope = _scopeFactory.CreateScope();
                     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-                    // 1. IDEMPOTÊNCIA
                     var existe = await db.Reservations.AnyAsync(r => r.Id == dto.ReservationId, stoppingToken);
                     
                     if (existe)
@@ -80,7 +83,6 @@ public class Worker : BackgroundService
                         return;
                     }
 
-                    // 2. GRAVAÇÃO
                     var novaReserva = new Reservation
                     {
                         Id = dto.ReservationId,
@@ -103,21 +105,17 @@ public class Worker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Falha crítica ao processar mensagem. Re-enfileirando...");
-                // Nack com requeue: true para tentar processar novamente depois
+                _logger.LogError(ex, "❌ Falha ao processar mensagem. Re-enfileirando...");
                 await _channel.BasicNackAsync(ea.DeliveryTag, false, requeue: true, stoppingToken);
             }
         };
 
         await _channel.BasicConsumeAsync("reservation_queue", false, consumer, stoppingToken);
-
-        // Mantém o worker vivo ouvindo a fila
         await Task.Delay(Timeout.Infinite, stoppingToken);
     }
 
     public override async Task StopAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("🛑 Encerrando Worker...");
         if (_channel is not null) await _channel.CloseAsync(stoppingToken);
         if (_connection is not null) await _connection.CloseAsync(stoppingToken);
         await base.StopAsync(stoppingToken);

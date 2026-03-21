@@ -125,15 +125,23 @@ Expected services:
 
 ## Technical Roadmap (Next Steps)
 
-1. Create `shared-contracts` with versioned DTOs.
-2. Implement the API Gateway publishing messages to RabbitMQ.
-3. Implement the Reservation Worker with distributed locking in Redis.
-4. Persist reservations in PostgreSQL with EF Core.
+1. ✅ Create `shared-contracts` with versioned DTOs.
+2. ✅ Implement the API Gateway publishing messages to RabbitMQ.
+3. ✅ Implement the Reservation Worker with distributed locking in Redis.
+4. ✅ Persist reservations in PostgreSQL with EF Core.
 5. Add observability (structured logs, metrics, and tracing).
-6. Publish Kubernetes manifests in `infra/k8s` with HPA.
+6. Enhance Kubernetes manifests in `infra/k8s` with HPA and production configurations.
 7. Implement status feedback to the app (polling, WebSocket, or push).
 
 ## Status
 
-The project is in the initial monorepo structuring phase, with a defined architecture to safely support extreme concurrency.
+The project has progressed beyond the initial structuring phase. The monorepo structure is fully implemented with:
+
+- **Mobile App**: React Native app with Expo, featuring drawer navigation, sector selection, time slot picker, reservation confirmation, and API integration.
+- **Backend Services**: API Gateway with reservations endpoint, Reservation Worker with distributed locking via Redis, and shared contracts library.
+- **Database**: PostgreSQL schema with entities for Reservations, Sectors, RestaurantTables, TimeSlots, and Restaurants, including EF Core migrations and seeding.
+- **Infrastructure**: Docker Compose setup for PostgreSQL, RabbitMQ, and Redis; Dockerfiles for services; initial Kubernetes manifests.
+- **Concurrency Handling**: Redis-based distributed locking implemented for table reservations to prevent race conditions.
+
+Recent developments include RabbitMQ message queuing, enhanced error handling, UI improvements for table selection and reservation flow, and comprehensive API integration.
 
